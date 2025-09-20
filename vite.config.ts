@@ -23,9 +23,14 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       port: 5000,
       allowedHosts: true, // Allow all hosts for Replit development
-      hmr: {
+      hmr: isReplit ? false : {
         port: 5000
       },
+      // Use polling for file watching in Replit environment
+      watch: isReplit ? {
+        usePolling: true,
+        interval: 1000
+      } : undefined,
       proxy: {
         // Proxy specific API endpoints to Cloudflare Worker backend
         '/check-open-ai-key': {
