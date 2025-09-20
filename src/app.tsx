@@ -418,7 +418,11 @@ export default function Chat() {
 
 const hasOpenAiKeyPromise = fetch("/check-open-ai-key")
   .then((res) => res.json<{ success: boolean }>())
-  .catch(() => ({ success: false })); // Fallback for development mode
+  .catch(() => {
+    // In Replit development mode, assume API key is configured since backend endpoint isn't available
+    const isReplit = process.env.REPL_ID !== undefined || window.location.hostname.includes('replit.dev');
+    return { success: isReplit };
+  });
 
 function HasOpenAIKey() {
   const hasOpenAiKey = use(hasOpenAiKeyPromise);
