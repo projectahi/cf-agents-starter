@@ -416,9 +416,9 @@ export default function Chat() {
   );
 }
 
-const hasOpenAiKeyPromise = fetch("/check-open-ai-key").then((res) =>
-  res.json<{ success: boolean }>()
-);
+const hasOpenAiKeyPromise = fetch("/check-open-ai-key")
+  .then((res) => res.json<{ success: boolean }>())
+  .catch(() => ({ success: false })); // Fallback for development mode
 
 function HasOpenAIKey() {
   const hasOpenAiKey = use(hasOpenAiKeyPromise);
