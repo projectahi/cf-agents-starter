@@ -43,10 +43,6 @@ externalPort = 3001
 localPort = 9229
 externalPort = 3000
 
-[[ports]]
-localPort = 41037
-externalPort = 3002
-
 [deployment]
 deploymentTarget = "vm"
 run = ["wrangler", "deploy"]
