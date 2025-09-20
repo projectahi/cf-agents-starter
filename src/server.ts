@@ -23,7 +23,8 @@ import {
   listTools,
   registerOpenApiSpec,
   updateToolGuidance,
-  getToolPrompt
+  getToolPrompt,
+  deleteTool
 } from "./tool-registry";
 import { OpenApiToolError } from "./lib/openapi-tools";
 // import { env } from "cloudflare:workers";
@@ -183,10 +184,29 @@ export default {
         }
       }
 
+      if (request.method === "DELETE") {
+        try {
+          deleteTool(toolName);
+          return Response.json({
+            prompt: getToolPrompt()
+          });
+        } catch (error) {
+          console.error("Error deleting tool", error);
+          const status = error instanceof OpenApiToolError ? 404 : 500;
+          return Response.json(
+            {
+              error: "Failed to delete tool",
+              details: String(error)
+            },
+            { status }
+          );
+        }
+      }
+
       return new Response("Method Not Allowed", {
         status: 405,
         headers: {
-          Allow: "PATCH"
+          Allow: "PATCH, DELETE"
         }
       });
     }

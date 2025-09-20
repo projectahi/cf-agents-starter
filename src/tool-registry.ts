@@ -38,6 +38,7 @@ const dynamicExecutions: Record<string, ExecutionHandler> = {};
 const dynamicToolMetadata: ToolListItem[] = [];
 const guidanceOverrides: Record<string, string> = {};
 const guidanceUpdatedAt: Record<string, string> = {};
+const deletedTools: Record<string, boolean> = {};
 
 function getBuiltinToolMetadata(): ToolListItem[] {
   return baseToolMetadata.map((item) => ({
@@ -162,6 +163,7 @@ export async function registerOpenApiSpec(
 
   for (const definition of adjustedDefinitions) {
     dynamicTools[definition.name] = definition.tool;
+    delete deletedTools[definition.name];
     if (definition.execution) {
       dynamicExecutions[definition.name] = definition.execution;
     } else {
@@ -204,6 +206,9 @@ export function clearDynamicTools() {
       delete guidanceUpdatedAt[key];
     }
   }
+  for (const key of Object.keys(deletedTools)) {
+    delete deletedTools[key];
+  }
 }
 
 export function updateToolGuidance({
@@ -213,6 +218,10 @@ export function updateToolGuidance({
   name: string;
   description: string;
 }): ToolListItem {
+  if (deletedTools[name]) {
+    throw new OpenApiToolError(`Tool ${name} has been removed`);
+  }
+
   guidanceOverrides[name] = description;
   guidanceUpdatedAt[name] = new Date().toISOString();
 
@@ -246,4 +255,27 @@ export function getToolPrompt(): string {
   return listTools()
     .map((tool) => `- ${tool.name}: ${tool.description}`)
     .join("\n");
+}
+
+export function deleteTool(name: string): void {
+  if (name in builtinTools) {
+    throw new OpenApiToolError(
+      `Cannot delete built-in tool ${name}. You can only remove dynamic tools.`
+    );
+  }
+
+  if (!(name in dynamicTools)) {
+    throw new OpenApiToolError(`Tool ${name} not found`);
+  }
+
+  delete dynamicTools[name];
+  delete dynamicExecutions[name];
+  delete guidanceOverrides[name];
+  delete guidanceUpdatedAt[name];
+  deletedTools[name] = true;
+
+  const index = dynamicToolMetadata.findIndex((tool) => tool.name === name);
+  if (index !== -1) {
+    dynamicToolMetadata.splice(index, 1);
+  }
 }

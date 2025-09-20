@@ -30,6 +30,7 @@ const usageCueTemplates = [
 ] as const;
 
 type SaveState = "idle" | "saving" | "success" | "error";
+type DeleteState = "idle" | "deleting" | "error";
 
 interface ToolsPanelProps {
   tools: ToolListItem[];
@@ -39,6 +40,7 @@ interface ToolsPanelProps {
   onRefresh: () => Promise<void>;
   onRegister: (args: RegisterToolArgs) => Promise<RegisterResponse>;
   onUpdateGuidance: (args: UpdateToolArgs) => Promise<ToolListItem>;
+  onDeleteTool: (name: string) => Promise<void>;
 }
 
 export function ToolsPanel({
@@ -48,7 +50,8 @@ export function ToolsPanel({
   prompt,
   onRefresh,
   onRegister,
-  onUpdateGuidance
+  onUpdateGuidance,
+  onDeleteTool
 }: ToolsPanelProps) {
   const specNameInputId = useId();
   const specTextareaId = useId();
@@ -62,6 +65,9 @@ export function ToolsPanel({
   const [saveStates, setSaveStates] = useState<
     Record<string, { state: SaveState; message?: string }>
   >({});
+  const [deleteStates, setDeleteStates] = useState<Record<string, DeleteState>>(
+    {}
+  );
   const [activeCue, setActiveCue] = useState<
     (typeof usageCueTemplates)[number] | null
   >(null);
@@ -158,6 +164,49 @@ export function ToolsPanel({
         }
       }));
     } catch (error) {
+      setSaveStates((prev) => ({
+        ...prev,
+        [tool.name]: {
+          state: "error",
+          message: error instanceof Error ? error.message : String(error)
+        }
+      }));
+    }
+  };
+
+  const handleDeleteTool = async (tool: ToolListItem) => {
+    if (tool.source === "builtin") {
+      setDeleteStates((prev) => ({
+        ...prev,
+        [tool.name]: "error"
+      }));
+      setSaveStates((prev) => ({
+        ...prev,
+        [tool.name]: {
+          state: "error",
+          message: "Built-in tools cannot be deleted."
+        }
+      }));
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Remove ${tool.name}? The agent will no longer see or call this tool.`
+    );
+    if (!confirmed) return;
+
+    setDeleteStates((prev) => ({ ...prev, [tool.name]: "deleting" }));
+
+    try {
+      await onDeleteTool(tool.name);
+      setDeleteStates((prev) => ({ ...prev, [tool.name]: "idle" }));
+      setSaveStates((prev) => {
+        const next = { ...prev };
+        delete next[tool.name];
+        return next;
+      });
+    } catch (error) {
+      setDeleteStates((prev) => ({ ...prev, [tool.name]: "error" }));
       setSaveStates((prev) => ({
         ...prev,
         [tool.name]: {
@@ -266,6 +315,8 @@ export function ToolsPanel({
               updatedAtDate.getTime() === 0
                 ? "Never"
                 : updatedAtDate.toLocaleString();
+            const deleteState = deleteStates[tool.name] ?? "idle";
+            const isDeleting = deleteState === "deleting";
 
             return (
               <Card key={`${tool.source}-${tool.name}`} className="p-3">
@@ -332,6 +383,15 @@ export function ToolsPanel({
                       disabled={saveState === "saving" || !hasUnsavedChanges}
                     >
                       {saveState === "saving" ? "Saving…" : "Save guidance"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      disabled={isDeleting || tool.source === "builtin"}
+                      onClick={() => handleDeleteTool(tool)}
+                    >
+                      {isDeleting ? "Removing…" : "Delete"}
                     </Button>
                     {hasUnsavedChanges && saveState !== "saving" && (
                       <span className="text-xs text-neutral-500">

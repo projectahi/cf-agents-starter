@@ -35,6 +35,10 @@ export interface UpdateToolArgs {
   description: string;
 }
 
+interface DeleteResponse {
+  prompt?: string;
+}
+
 export function useTools() {
   const [tools, setTools] = useState<ToolListItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -143,6 +147,28 @@ export function useTools() {
     );
   }, [tools]);
 
+  const deleteTool = useCallback(async (name: string) => {
+    const response = await fetch(`/api/tools/${encodeURIComponent(name)}`, {
+      method: "DELETE"
+    });
+
+    if (!response.ok) {
+      const errorBody = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      const message =
+        errorBody?.error ?? `Failed to delete tool (status ${response.status})`;
+      throw new Error(message);
+    }
+
+    const data = (await response.json()) as DeleteResponse;
+    if (data.prompt !== undefined) {
+      setPrompt(data.prompt);
+    }
+
+    setTools((prev) => prev.filter((tool) => tool.name !== name));
+  }, []);
+
   return {
     tools,
     isLoading,
@@ -151,6 +177,7 @@ export function useTools() {
     refresh: fetchTools,
     registerOpenApiSpec,
     updateToolGuidance,
-    confirmationToolNames
+    confirmationToolNames,
+    deleteTool
   };
 }
