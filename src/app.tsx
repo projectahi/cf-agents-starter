@@ -39,6 +39,7 @@ export default function Chat() {
     return (savedTheme as "dark" | "light") || "dark";
   });
   const [showDebug, setShowDebug] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [textareaHeight, setTextareaHeight] = useState("auto");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -114,6 +115,12 @@ export default function Chat() {
     agent
   });
 
+  const handleStartNewChat = () => {
+    clearHistory();
+    setAgentInput("");
+    setIsSidebarOpen(false);
+  };
+
   // Scroll to bottom when messages change
   useEffect(() => {
     agentMessages.length > 0 && scrollToBottom();
@@ -138,8 +145,55 @@ export default function Chat() {
   return (
     <div className="h-[100vh] w-full p-4 flex justify-center items-center bg-fixed overflow-hidden">
       <HasOpenAIKey />
+      <div
+        className={`fixed inset-0 z-40 bg-black/30 transition-opacity duration-200 ${
+          isSidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+        onClick={() => setIsSidebarOpen(false)}
+        aria-hidden="true"
+      />
+      <aside
+        className={`fixed left-0 top-0 bottom-0 z-50 w-64 bg-white dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 shadow-xl transform transition-transform duration-300 ease-in-out ${
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+        role="navigation"
+        aria-label="Sidebar navigation"
+        id="sidebar-menu"
+      >
+        <div className="flex items-center justify-between px-4 py-4 border-b border-neutral-200 dark:border-neutral-800">
+          <h2 className="text-base font-semibold">Menu</h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsSidebarOpen(false)}
+            aria-label="Close menu"
+          >
+            Close
+          </Button>
+        </div>
+        <nav className="p-4 space-y-2">
+          <button
+            type="button"
+            onClick={handleStartNewChat}
+            className="flex w-full items-center gap-2 rounded-md border border-transparent px-3 py-2 text-left text-sm font-medium text-neutral-700 transition-colors hover:border-neutral-200 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:border-neutral-700 dark:hover:bg-neutral-800"
+          >
+            <Robot size={18} />
+            Start new chat
+          </button>
+        </nav>
+      </aside>
       <div className="h-[calc(100vh-2rem)] w-full mx-auto max-w-lg flex flex-col shadow-xl rounded-md overflow-hidden relative border border-neutral-300 dark:border-neutral-800">
         <div className="px-4 py-3 border-b border-neutral-300 dark:border-neutral-800 flex items-center gap-3 sticky top-0 z-10">
+          <Button
+            variant="ghost"
+            size="md"
+            onClick={() => setIsSidebarOpen(true)}
+            aria-expanded={isSidebarOpen}
+            aria-controls="sidebar-menu"
+            className="text-sm font-medium"
+          >
+            Menu
+          </Button>
           <div className="flex items-center justify-center h-8 w-8">
             <svg
               width="28px"
