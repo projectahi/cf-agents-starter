@@ -40,10 +40,6 @@ localPort = 9229
 externalPort = 3000
 exposeLocalhost = true
 
-[[ports]]
-localPort = 37613
-externalPort = 3001
-
 [deployment]
 deploymentTarget = "vm"
 run = ["wrangler", "deploy"]
