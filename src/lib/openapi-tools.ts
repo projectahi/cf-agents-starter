@@ -391,7 +391,8 @@ export function buildToolsFromOpenApi(
             specName,
             operationId
           },
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         }
       });
     }

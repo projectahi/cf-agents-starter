@@ -24,6 +24,7 @@ export interface ToolListItem {
     operationId?: string;
   } | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 type ExecutionHandler = (
@@ -35,24 +36,38 @@ type ExecutionHandler = (
 const dynamicTools: ToolSet = {};
 const dynamicExecutions: Record<string, ExecutionHandler> = {};
 const dynamicToolMetadata: ToolListItem[] = [];
+const guidanceOverrides: Record<string, string> = {};
+const guidanceUpdatedAt: Record<string, string> = {};
 
 function getBuiltinToolMetadata(): ToolListItem[] {
   return baseToolMetadata.map((item) => ({
     name: item.name,
-    description: item.description,
+    description: guidanceOverrides[item.name] ?? item.description,
     requiresConfirmation: item.requiresConfirmation,
     schema: zodToJsonSchema(item.inputSchema),
     source: item.source,
     origin: { type: "manual" },
-    createdAt: new Date(0).toISOString()
+    createdAt: new Date(0).toISOString(),
+    updatedAt: guidanceUpdatedAt[item.name] ?? new Date(0).toISOString()
   }));
 }
 
 export function getToolSet(): ToolSet {
-  return {
+  const combined: Record<string, unknown> = {
     ...builtinTools,
     ...dynamicTools
   };
+
+  for (const [name, override] of Object.entries(guidanceOverrides)) {
+    if (!override || !(name in combined)) continue;
+    const tool = combined[name] as Record<string, unknown>;
+    combined[name] = {
+      ...tool,
+      description: override
+    };
+  }
+
+  return combined as ToolSet;
 }
 
 export function getExecutionHandlers() {
@@ -63,7 +78,19 @@ export function getExecutionHandlers() {
 }
 
 export function listTools(): ToolListItem[] {
-  return [...getBuiltinToolMetadata(), ...dynamicToolMetadata];
+  const builtin = getBuiltinToolMetadata();
+
+  const dynamic = dynamicToolMetadata.map((item) => {
+    const override = guidanceOverrides[item.name];
+    if (!override) return item;
+    return {
+      ...item,
+      description: override,
+      updatedAt: guidanceUpdatedAt[item.name] ?? item.updatedAt
+    };
+  });
+
+  return [...builtin, ...dynamic];
 }
 
 export interface RegisterOpenApiSpecArgs {
@@ -73,6 +100,7 @@ export interface RegisterOpenApiSpecArgs {
 
 export interface RegisterOpenApiSpecResult {
   tools: ToolListItem[];
+  prompt: string;
 }
 
 export async function registerOpenApiSpec(
@@ -125,6 +153,8 @@ export async function registerOpenApiSpec(
       dynamicToolMetadata.splice(index, 1);
       delete dynamicTools[metadata.name];
       delete dynamicExecutions[metadata.name];
+      delete guidanceOverrides[metadata.name];
+      delete guidanceUpdatedAt[metadata.name];
     }
   }
 
@@ -137,12 +167,26 @@ export async function registerOpenApiSpec(
     } else {
       delete dynamicExecutions[definition.name];
     }
-    dynamicToolMetadata.push(definition.metadata);
-    registeredTools.push(definition.metadata);
+    const existingIndex = dynamicToolMetadata.findIndex(
+      (item) => item.name === definition.name
+    );
+    if (existingIndex !== -1) {
+      dynamicToolMetadata.splice(existingIndex, 1);
+    }
+    const metadata = {
+      ...definition.metadata,
+      description:
+        guidanceOverrides[definition.name] ?? definition.metadata.description,
+      updatedAt:
+        guidanceUpdatedAt[definition.name] ?? definition.metadata.updatedAt
+    } satisfies ToolListItem;
+    dynamicToolMetadata.push(metadata);
+    registeredTools.push(metadata);
   }
 
   return {
-    tools: registeredTools
+    tools: registeredTools,
+    prompt: getToolPrompt()
   };
 }
 
@@ -154,4 +198,52 @@ export function clearDynamicTools() {
     delete dynamicExecutions[key];
   }
   dynamicToolMetadata.length = 0;
+  for (const key of Object.keys(guidanceOverrides)) {
+    if (!(key in builtinTools)) {
+      delete guidanceOverrides[key];
+      delete guidanceUpdatedAt[key];
+    }
+  }
+}
+
+export function updateToolGuidance({
+  name,
+  description
+}: {
+  name: string;
+  description: string;
+}): ToolListItem {
+  guidanceOverrides[name] = description;
+  guidanceUpdatedAt[name] = new Date().toISOString();
+
+  if (name in dynamicTools) {
+    const tool = dynamicTools[name] as Record<string, unknown>;
+    dynamicTools[name] = {
+      ...tool,
+      description
+    } as ToolSet[string];
+  }
+
+  const dynamicIndex = dynamicToolMetadata.findIndex(
+    (item) => item.name === name
+  );
+  if (dynamicIndex !== -1) {
+    dynamicToolMetadata[dynamicIndex] = {
+      ...dynamicToolMetadata[dynamicIndex],
+      description,
+      updatedAt: guidanceUpdatedAt[name]
+    };
+  }
+
+  const updated = listTools().find((item) => item.name === name);
+  if (!updated) {
+    throw new OpenApiToolError(`Tool ${name} not found`);
+  }
+  return updated;
+}
+
+export function getToolPrompt(): string {
+  return listTools()
+    .map((tool) => `- ${tool.name}: ${tool.description}`)
+    .join("\n");
 }

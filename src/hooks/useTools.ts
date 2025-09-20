@@ -12,14 +12,17 @@ export interface ToolListItem {
     operationId?: string;
   } | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 interface ToolsResponse {
   tools: ToolListItem[];
+  prompt?: string;
 }
 
-interface RegisterResponse {
+export interface RegisterResponse {
   tools: ToolListItem[];
+  prompt?: string;
 }
 
 export interface RegisterToolArgs {
@@ -27,10 +30,16 @@ export interface RegisterToolArgs {
   spec: string;
 }
 
+export interface UpdateToolArgs {
+  name: string;
+  description: string;
+}
+
 export function useTools() {
   const [tools, setTools] = useState<ToolListItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState<string>("");
 
   const fetchTools = useCallback(async () => {
     setIsLoading(true);
@@ -42,6 +51,7 @@ export function useTools() {
       }
       const data = (await response.json()) as ToolsResponse;
       setTools(data.tools);
+      setPrompt(data.prompt ?? "");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -74,10 +84,57 @@ export function useTools() {
       }
 
       const data = (await response.json()) as RegisterResponse;
+      if (data.prompt) {
+        setPrompt(data.prompt);
+      }
       await fetchTools();
       return data;
     },
     [fetchTools]
+  );
+
+  const updateToolGuidance = useCallback(
+    async ({ name, description }: UpdateToolArgs): Promise<ToolListItem> => {
+      const response = await fetch(`/api/tools/${encodeURIComponent(name)}`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ description })
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        const message =
+          errorBody?.error ??
+          `Failed to update tool guidance (status ${response.status})`;
+        throw new Error(message);
+      }
+
+      const data = (await response.json()) as {
+        tool: ToolListItem;
+        prompt?: string;
+      };
+
+      setTools((prev) => {
+        const hasTool = prev.some((tool) => tool.name === data.tool.name);
+        if (!hasTool) {
+          return [...prev, data.tool];
+        }
+        return prev.map((tool) =>
+          tool.name === data.tool.name ? data.tool : tool
+        );
+      });
+
+      if (data.prompt !== undefined) {
+        setPrompt(data.prompt);
+      }
+
+      return data.tool;
+    },
+    []
   );
 
   const confirmationToolNames = useMemo(() => {
@@ -90,8 +147,10 @@ export function useTools() {
     tools,
     isLoading,
     error,
+    prompt,
     refresh: fetchTools,
     registerOpenApiSpec,
+    updateToolGuidance,
     confirmationToolNames
   };
 }
