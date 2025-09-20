@@ -15,7 +15,15 @@ import {
 } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { processToolCalls, cleanupMessages } from "./utils";
-import { tools, executions } from "./tools";
+import { ZodError } from "zod";
+import { z } from "zod/v3";
+import {
+  getToolSet,
+  getExecutionHandlers,
+  listTools,
+  registerOpenApiSpec
+} from "./tool-registry";
+import { OpenApiToolError } from "./lib/openapi-tools";
 // import { env } from "cloudflare:workers";
 
 const model = openai("gpt-4o-2024-11-20");
@@ -41,10 +49,12 @@ export class Chat extends AIChatAgent<Env> {
     // );
 
     // Collect all tools, including MCP tools
+    const registryTools = getToolSet();
     const allTools = {
-      ...tools,
+      ...registryTools,
       ...this.mcp.getAITools()
     };
+    const executionHandlers = getExecutionHandlers();
 
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
@@ -57,7 +67,7 @@ export class Chat extends AIChatAgent<Env> {
           messages: cleanedMessages,
           dataStream: writer,
           tools: allTools,
-          executions
+          executions: executionHandlers
         });
 
         const result = streamText({
@@ -118,6 +128,59 @@ export default {
         success: hasOpenAIKey
       });
     }
+
+    if (url.pathname === "/api/tools") {
+      if (request.method === "GET") {
+        return Response.json({
+          tools: listTools()
+        });
+      }
+
+      if (request.method === "POST") {
+        const bodySchema = z.object({
+          name: z.string().min(1).optional(),
+          spec: z.string().min(1)
+        });
+
+        let parsedBody: z.infer<typeof bodySchema>;
+        try {
+          const json = await request.json();
+          parsedBody = bodySchema.parse(json);
+        } catch (error) {
+          return Response.json(
+            {
+              error: "Invalid request body",
+              details:
+                error instanceof ZodError ? error.flatten() : String(error)
+            },
+            { status: 400 }
+          );
+        }
+
+        try {
+          const result = await registerOpenApiSpec(parsedBody);
+          return Response.json(result, { status: 201 });
+        } catch (error) {
+          console.error("Error registering OpenAPI spec", error);
+          const status = error instanceof OpenApiToolError ? 400 : 500;
+          return Response.json(
+            {
+              error: "Failed to register tool specification",
+              details: String(error)
+            },
+            { status }
+          );
+        }
+      }
+
+      return new Response("Method Not Allowed", {
+        status: 405,
+        headers: {
+          Allow: "GET, POST"
+        }
+      });
+    }
+
     if (!process.env.OPENAI_API_KEY) {
       console.error(
         "OPENAI_API_KEY is not set, don't forget to set it locally in .dev.vars, and use `wrangler secret bulk .dev.vars` to upload it to production"
