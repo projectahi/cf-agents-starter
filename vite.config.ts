@@ -4,18 +4,27 @@ import react from "@vitejs/plugin-react";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 
-export default defineConfig({
-  plugins: [cloudflare(), react(), tailwindcss()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src")
+export default defineConfig(({ mode }) => {
+  const isReplit = process.env.REPL_ID !== undefined;
+  
+  return {
+    plugins: [
+      // For Replit environment, we'll disable cloudflare plugin during development
+      ...(isReplit && mode === 'development' ? [] : [cloudflare()]),
+      react(),
+      tailwindcss()
+    ],
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "./src")
+      }
+    },
+    server: {
+      host: "0.0.0.0",
+      port: 5000,
+      hmr: {
+        port: 5000
+      }
     }
-  },
-  server: {
-    host: "0.0.0.0",
-    port: 5000,
-    hmr: {
-      port: 5000
-    }
-  }
+  };
 });
