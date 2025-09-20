@@ -27,9 +27,16 @@ import {
   deleteTool
 } from "./tool-registry";
 import { OpenApiToolError } from "./lib/openapi-tools";
+import {
+  getAgentConfig,
+  updateAgentConfig,
+  resetAgentConfig,
+  agentConfigValidators,
+  ALLOWED_MODEL_IDS,
+  defaultAgentConfig
+} from "./agent-config";
 // import { env } from "cloudflare:workers";
 
-const model = openai("gpt-4o-2024-11-20");
 // Cloudflare AI Gateway
 // const openai = createOpenAI({
 //   apiKey: env.OPENAI_API_KEY,
@@ -78,23 +85,28 @@ export class Chat extends AIChatAgent<Env> {
           ? `\n\nTOOLS AVAILABLE (read carefully before responding):\n${toolPrompt}`
           : "";
 
+        const agentConfig = getAgentConfig();
+        const model = openai(agentConfig.modelId);
+
+        const scheduleGuidance = getSchedulePrompt({ date: new Date() });
+        const systemPrompt = `${agentConfig.systemPrompt.trim()}
+
+${scheduleGuidance}
+
+If the user asks to schedule a task, use the schedule tool to schedule the task.${toolsSection}`;
+
         const result = streamText({
-          system: `You are a helpful assistant that can do various tasks... 
-
-${getSchedulePrompt({ date: new Date() })}
-
-If the user asks to schedule a task, use the schedule tool to schedule the task.${toolsSection}
-`,
-
+          system: systemPrompt,
           messages: convertToModelMessages(processedMessages),
           model,
+          temperature: agentConfig.temperature,
           tools: allTools,
           // Type boundary: streamText expects specific tool types, but base class uses ToolSet
           // This is safe because our tools satisfy ToolSet interface (verified by 'satisfies' in tools.ts)
           onFinish: onFinish as unknown as StreamTextOnFinishCallback<
             typeof allTools
           >,
-          stopWhen: stepCountIs(10)
+          stopWhen: stepCountIs(agentConfig.maxSteps)
         });
 
         writer.merge(result.toUIMessageStream());
@@ -134,6 +146,67 @@ export default {
       const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
       return Response.json({
         success: hasOpenAIKey
+      });
+    }
+
+    if (url.pathname === "/api/agent-config") {
+      if (request.method === "GET") {
+        return Response.json({
+          config: getAgentConfig(),
+          defaults: defaultAgentConfig,
+          allowedModels: Array.from(ALLOWED_MODEL_IDS)
+        });
+      }
+
+      if (request.method === "PATCH") {
+        let parsedBody: unknown;
+        try {
+          parsedBody = await request.json();
+        } catch (error) {
+          return Response.json(
+            {
+              error: "Invalid JSON body",
+              details: String(error)
+            },
+            { status: 400 }
+          );
+        }
+
+        try {
+          const update = agentConfigValidators.update.parse(parsedBody);
+          const config = updateAgentConfig(update);
+          return Response.json({ config });
+        } catch (error) {
+          const message =
+            error instanceof ZodError ? error.flatten() : String(error);
+          return Response.json(
+            {
+              error: "Invalid agent configuration",
+              details: message
+            },
+            { status: 400 }
+          );
+        }
+      }
+
+      if (request.method === "DELETE") {
+        if (request.headers.get("cf-agent-config-reset") !== "confirm") {
+          return Response.json(
+            {
+              error: "Missing confirmation header"
+            },
+            { status: 400 }
+          );
+        }
+        const config = resetAgentConfig();
+        return Response.json({ config });
+      }
+
+      return new Response("Method Not Allowed", {
+        status: 405,
+        headers: {
+          Allow: "GET, PATCH, DELETE"
+        }
       });
     }
 
