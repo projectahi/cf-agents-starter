@@ -6,6 +6,9 @@
   "private": true,
   "scripts": {
     "start": "vite dev",
+    "dev": "npm-run-all --parallel dev:frontend dev:backend",
+    "dev:frontend": "vite dev",
+    "dev:backend": "wrangler dev --port 8787 --local-protocol http --local",
     "deploy": "vite build && wrangler deploy",
     "test": "vitest",
     "types": "wrangler types env.d.ts --include-runtime false",
@@ -50,6 +53,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "marked": "^16.3.0",
+    "npm-run-all": "^4.1.5",
     "openai": "^5.22.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

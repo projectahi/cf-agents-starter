@@ -25,6 +25,26 @@ export default defineConfig(({ mode }) => {
       allowedHosts: true, // Allow all hosts for Replit development
       hmr: {
         port: 5000
+      },
+      proxy: {
+        // Proxy specific API endpoints to Cloudflare Worker backend
+        '/check-open-ai-key': {
+          target: 'http://localhost:8787',
+          changeOrigin: true,
+          secure: false
+        },
+        // Proxy agent API calls
+        '/agents': {
+          target: 'http://localhost:8787',
+          changeOrigin: true,
+          secure: false
+        },
+        // Proxy any other API routes but NOT static files or root
+        '^/api/.*': {
+          target: 'http://localhost:8787',
+          changeOrigin: true,
+          secure: false
+        }
       }
     }
   };
