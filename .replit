@@ -28,7 +28,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run dev"
+args = "npm start"
 waitForPort = 5000
 
 [[ports]]
@@ -38,7 +38,6 @@ externalPort = 80
 [[ports]]
 localPort = 9229
 externalPort = 3002
-exposeLocalhost = true
 
 [[ports]]
 localPort = 9230
@@ -49,8 +48,13 @@ localPort = 9231
 externalPort = 3001
 
 [[ports]]
-localPort = 40141
+localPort = 44801
 externalPort = 3003
+
+[[ports]]
+localPort = 44837
+externalPort = 4200
+exposeLocalhost = true
 
 [deployment]
 deploymentTarget = "vm"

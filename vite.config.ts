@@ -4,13 +4,10 @@ import react from "@vitejs/plugin-react";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 
-export default defineConfig(({ mode }) => {
-  const isReplit = process.env.REPL_ID !== undefined;
-  
+export default defineConfig(() => {
   return {
     plugins: [
-      // Disable Cloudflare plugin in Replit due to auth issues, use manual wrangler instead
-      ...(isReplit ? [] : [cloudflare()]),
+      cloudflare(),
       react(),
       tailwindcss()
     ],
@@ -24,14 +21,7 @@ export default defineConfig(({ mode }) => {
       port: 5000,
       hmr: {
         port: 5000
-      },
-      // In Replit, proxy to manually started wrangler backend
-      ...(isReplit && {
-        proxy: {
-          '/check-open-ai-key': 'http://localhost:8787',
-          '/agents': 'http://localhost:8787'
-        }
-      })
+      }
     }
   };
 });
