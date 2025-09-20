@@ -1,3 +1,7 @@
+# ⚠️ CRITICAL REFERENCE FILES
+
+**ALWAYS CHECK BEFORE ANY CODE CHANGES**: `.cursor/rules/cloudflare.mdc` contains comprehensive Cloudflare Workers, Agents SDK, and deployment best practices. This file is MANDATORY reading for any Cloudflare-related development work.
+
 # Overview
 
 The Chat Agent Starter Kit is a modern AI-powered chat application built on Cloudflare's platform. It provides an interactive chat interface with AI agents that can execute tools both automatically and with human-in-the-loop confirmation. The application features real-time streaming responses, advanced task scheduling, and a responsive UI with dark/light theme support.
@@ -74,6 +78,76 @@ Tools are defined in `tools.ts` with Zod schema validation for inputs. The syste
 - **Workflow**: Frontend workflow set up with npm start command and port 5000 monitoring
 - **Environment Variables**: .dev.vars file created for OpenAI API key configuration
 - **Deployment**: VM deployment target configured for production builds
+
+# Cloudflare Best Practices Summary
+
+*Full guidelines available in `.cursor/rules/cloudflare.mdc` - MUST be consulted for any Cloudflare development*
+
+## Code Standards
+
+- **Language**: Use TypeScript by default unless JavaScript specifically requested
+- **Module Format**: Use ES modules exclusively (never Service Worker format)
+- **File Organization**: Keep code in single file unless otherwise specified
+- **Dependencies**: Minimize external dependencies; use official SDKs when available
+- **Security**: Never bake secrets into code; include proper error handling and logging
+- **Types**: Add appropriate TypeScript types and interfaces with explanatory comments
+
+## Configuration Requirements
+
+- **Config Format**: Always use `wrangler.jsonc` (not wrangler.toml)
+- **Compatibility**: Set `compatibility_date = "2025-02-11"` and `compatibility_flags = ["nodejs_compat"]`
+- **Observability**: Set `enabled = true` and `head_sampling_rate = 1` for observability
+- **Bindings**: Only include bindings that are actually used in code
+
+## Cloudflare Service Integration
+
+**Storage & Data:**
+- **Workers KV**: Key-value storage for configuration, user profiles, A/B testing
+- **Durable Objects**: Strongly consistent state management, multiplayer coordination
+- **D1**: Relational data with SQL dialect
+- **R2**: Object storage for structured data, AI/image assets, user uploads
+- **Hyperdrive**: Connect to existing PostgreSQL databases
+
+**Processing & AI:**
+- **Queues**: Asynchronous processing and background tasks
+- **Vectorize**: Store embeddings for vector search (with Workers AI)
+- **Workers AI**: Default AI API for inference (use official SDKs for Claude/OpenAI)
+- **Browser Rendering**: Remote browser capabilities, web scraping, Puppeteer APIs
+- **Workers Static Assets**: Host frontend applications and static files
+
+## Agents SDK Best Practices
+
+- **Preference**: Strongly prefer agent-sdk for building AI Agents
+- **Streaming**: Use streaming responses from AI SDKs (OpenAI, Workers AI, Anthropic)
+- **State Management**: Use `this.setState` API for state; `this.sql` for direct SQLite access
+- **Frontend Integration**: Use `useAgent` React hook from `agents/react` for client connections
+- **Class Extension**: Provide `Env` and optional state as type parameters: `class AIAgent extends Agent<Env, MyState>`
+- **Configuration**: Include valid Durable Object bindings and set `migrations[].new_sqlite_classes` to Agent class name
+
+## WebSocket Guidelines
+
+- **API Choice**: Always use WebSocket Hibernation API (not legacy WebSocket API)
+- **Durable Objects**: Use Hibernation API within Durable Objects
+- **Connection**: Use `this.ctx.acceptWebSocket(server)` not `server.accept()`
+- **Handlers**: Define `webSocketMessage()` and `webSocketClose()` handlers
+- **Pattern**: Avoid `addEventListener` pattern for WebSocket events
+
+## Security & Performance
+
+**Security:**
+- Implement proper request validation and security headers
+- Handle CORS correctly; implement rate limiting where appropriate
+- Follow least privilege principle for bindings; sanitize user inputs
+
+**Performance:**
+- Optimize for cold starts; minimize unnecessary computation
+- Use appropriate caching strategies; consider Workers limits and quotas
+- Implement streaming where beneficial
+
+**Error Handling:**
+- Implement proper error boundaries with meaningful error messages
+- Return appropriate HTTP status codes; log errors appropriately
+- Handle edge cases gracefully
 
 # External Dependencies
 
