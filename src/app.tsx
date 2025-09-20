@@ -14,6 +14,7 @@ import { Textarea } from "@/components/textarea/Textarea";
 import { MemoizedMarkdown } from "@/components/memoized-markdown";
 import { ToolInvocationCard } from "@/components/tool-invocation-card/ToolInvocationCard";
 import { ToolsPanel } from "@/components/tools/ToolsPanel";
+import { AgentConfigPanel } from "@/components/agent-config/AgentConfigPanel";
 import { useTools } from "@/hooks/useTools";
 
 // Icon imports
@@ -25,7 +26,8 @@ import {
   Trash,
   PaperPlaneTilt,
   Stop,
-  Wrench
+  Wrench,
+  Gear
 } from "@phosphor-icons/react";
 
 export default function Chat() {
@@ -36,7 +38,9 @@ export default function Chat() {
   });
   const [showDebug, setShowDebug] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"chat" | "tools">("chat");
+  const [activeTab, setActiveTab] = useState<"chat" | "tools" | "config">(
+    "chat"
+  );
   const [textareaHeight, setTextareaHeight] = useState("auto");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -53,6 +57,7 @@ export default function Chat() {
   } = useTools();
 
   const isToolsView = activeTab === "tools";
+  const isConfigView = activeTab === "config";
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -158,11 +163,16 @@ export default function Chat() {
         : "border-transparent text-neutral-700 hover:border-neutral-200 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:border-neutral-700 dark:hover:bg-neutral-800"
     }`;
 
-  const headerTitle = isToolsView ? "Tool Manager" : "AI Chat Agent";
+  const headerTitle = isToolsView
+    ? "Tool Manager"
+    : isConfigView
+      ? "Agent Configuration"
+      : "AI Chat Agent";
 
-  const contentContainerClass = isToolsView
-    ? "flex-1 overflow-y-auto p-4"
-    : "flex-1 overflow-y-auto p-4 space-y-4 pb-24 max-h-[calc(100vh-10rem)]";
+  const contentContainerClass =
+    isToolsView || isConfigView
+      ? "flex-1 overflow-y-auto p-4"
+      : "flex-1 overflow-y-auto p-4 space-y-4 pb-24 max-h-[calc(100vh-10rem)]";
 
   return (
     <div className="h-[100vh] w-full p-4 flex justify-center items-center bg-fixed overflow-hidden">
@@ -217,9 +227,22 @@ export default function Chat() {
           </button>
           <button
             type="button"
+            onClick={() => {
+              setActiveTab("config");
+              setIsSidebarOpen(false);
+            }}
+            className={navButtonClass(activeTab === "config")}
+          >
+            <Gear size={18} />
+            Agent config
+          </button>
+          <button
+            type="button"
             onClick={handleStartNewChat}
-            disabled={isToolsView}
-            className={`${navButtonClass(false)} ${isToolsView ? "opacity-60 cursor-not-allowed" : ""}`}
+            disabled={isToolsView || isConfigView}
+            className={`${navButtonClass(false)} ${
+              isToolsView || isConfigView ? "opacity-60 cursor-not-allowed" : ""
+            }`}
           >
             <Robot size={18} />
             Start new chat
@@ -260,7 +283,7 @@ export default function Chat() {
             <h2 className="font-semibold text-base">{headerTitle}</h2>
           </div>
 
-          {!isToolsView && (
+          {activeTab === "chat" && (
             <div className="flex items-center gap-2 mr-2">
               <Bug size={16} />
               <Toggle
@@ -281,7 +304,7 @@ export default function Chat() {
             {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
           </Button>
 
-          {!isToolsView && (
+          {activeTab === "chat" && (
             <Button
               variant="ghost"
               size="md"
@@ -306,6 +329,8 @@ export default function Chat() {
               onUpdateGuidance={updateToolGuidance}
               onDeleteTool={deleteTool}
             />
+          ) : isConfigView ? (
+            <AgentConfigPanel />
           ) : (
             <>
               {agentMessages.length === 0 && (
