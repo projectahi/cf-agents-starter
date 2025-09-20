@@ -5,6 +5,8 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig(() => {
+  const isReplit = process.env.REPL_ID !== undefined;
+  
   return {
     plugins: [
       cloudflare(),
@@ -21,7 +23,9 @@ export default defineConfig(() => {
       port: 5000,
       hmr: {
         port: 5000
-      }
+      },
+      // Only add allowedHosts in Replit environment
+      ...(isReplit ? { allowedHosts: true as const } : {})
     }
   };
 });
