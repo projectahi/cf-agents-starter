@@ -48,6 +48,7 @@ export default function Chat() {
     refresh: refreshTools,
     registerOpenApiSpec,
     updateToolGuidance,
+    deleteTool,
     confirmationToolNames
   } = useTools();
 
@@ -303,6 +304,7 @@ export default function Chat() {
               onRefresh={refreshTools}
               onRegister={registerOpenApiSpec}
               onUpdateGuidance={updateToolGuidance}
+              onDeleteTool={deleteTool}
             />
           ) : (
             <>
