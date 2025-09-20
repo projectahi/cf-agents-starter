@@ -44,8 +44,10 @@ export default function Chat() {
     tools: toolMetadata,
     isLoading: isLoadingTools,
     error: toolsError,
+    prompt: toolsPrompt,
     refresh: refreshTools,
     registerOpenApiSpec,
+    updateToolGuidance,
     confirmationToolNames
   } = useTools();
 
@@ -297,8 +299,10 @@ export default function Chat() {
               tools={toolMetadata}
               isLoading={isLoadingTools}
               error={toolsError}
+              prompt={toolsPrompt}
               onRefresh={refreshTools}
               onRegister={registerOpenApiSpec}
+              onUpdateGuidance={updateToolGuidance}
             />
           ) : (
             <>

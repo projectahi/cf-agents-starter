@@ -21,7 +21,9 @@ import {
   getToolSet,
   getExecutionHandlers,
   listTools,
-  registerOpenApiSpec
+  registerOpenApiSpec,
+  updateToolGuidance,
+  getToolPrompt
 } from "./tool-registry";
 import { OpenApiToolError } from "./lib/openapi-tools";
 // import { env } from "cloudflare:workers";
@@ -70,12 +72,17 @@ export class Chat extends AIChatAgent<Env> {
           executions: executionHandlers
         });
 
+        const toolPrompt = getToolPrompt();
+        const toolsSection = toolPrompt
+          ? `\n\nTOOLS AVAILABLE (read carefully before responding):\n${toolPrompt}`
+          : "";
+
         const result = streamText({
           system: `You are a helpful assistant that can do various tasks... 
 
 ${getSchedulePrompt({ date: new Date() })}
 
-If the user asks to schedule a task, use the schedule tool to schedule the task.
+If the user asks to schedule a task, use the schedule tool to schedule the task.${toolsSection}
 `,
 
           messages: convertToModelMessages(processedMessages),
@@ -129,10 +136,66 @@ export default {
       });
     }
 
+    if (url.pathname.startsWith("/api/tools/")) {
+      const toolName = decodeURIComponent(
+        url.pathname.replace("/api/tools/", "")
+      );
+
+      if (request.method === "PATCH") {
+        const bodySchema = z.object({
+          description: z.string().min(1)
+        });
+
+        let parsedBody: z.infer<typeof bodySchema>;
+        try {
+          const json = await request.json();
+          parsedBody = bodySchema.parse(json);
+        } catch (error) {
+          return Response.json(
+            {
+              error: "Invalid request body",
+              details:
+                error instanceof ZodError ? error.flatten() : String(error)
+            },
+            { status: 400 }
+          );
+        }
+
+        try {
+          const tool = updateToolGuidance({
+            name: toolName,
+            description: parsedBody.description
+          });
+          return Response.json({
+            tool,
+            prompt: getToolPrompt()
+          });
+        } catch (error) {
+          console.error("Error updating tool guidance", error);
+          const status = error instanceof OpenApiToolError ? 404 : 500;
+          return Response.json(
+            {
+              error: "Failed to update tool",
+              details: String(error)
+            },
+            { status }
+          );
+        }
+      }
+
+      return new Response("Method Not Allowed", {
+        status: 405,
+        headers: {
+          Allow: "PATCH"
+        }
+      });
+    }
+
     if (url.pathname === "/api/tools") {
       if (request.method === "GET") {
         return Response.json({
-          tools: listTools()
+          tools: listTools(),
+          prompt: getToolPrompt()
         });
       }
 
