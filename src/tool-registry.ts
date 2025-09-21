@@ -71,11 +71,11 @@ export function getToolSet(): ToolSet {
   return combined as ToolSet;
 }
 
-export function getExecutionHandlers() {
+export function getExecutionHandlers(): Record<string, ExecutionHandler> {
   return {
     ...builtinExecutions,
     ...dynamicExecutions
-  };
+  } satisfies Record<string, ExecutionHandler>;
 }
 
 export function listTools(): ToolListItem[] {
@@ -251,8 +251,11 @@ export function updateToolGuidance({
   return updated;
 }
 
-export function getToolPrompt(): string {
+export function getToolPrompt(allowedNames?: string[] | null): string {
+  const allowed =
+    allowedNames && allowedNames.length > 0 ? new Set(allowedNames) : null;
   return listTools()
+    .filter((tool) => !allowed || allowed.has(tool.name))
     .map((tool) => `- ${tool.name}: ${tool.description}`)
     .join("\n");
 }
