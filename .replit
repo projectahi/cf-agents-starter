@@ -48,10 +48,6 @@ localPort = 9231
 externalPort = 3001
 
 [[ports]]
-localPort = 38505
-externalPort = 3003
-
-[[ports]]
 localPort = 44837
 externalPort = 4200
 exposeLocalhost = true
