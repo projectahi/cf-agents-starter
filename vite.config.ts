@@ -6,11 +6,11 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig(({ mode }) => {
   const isReplit = process.env.REPL_ID !== undefined;
-  
+
   return {
     plugins: [
       // For Replit environment, we'll disable cloudflare plugin during development
-      ...(isReplit && mode === 'development' ? [] : [cloudflare()]),
+      ...(isReplit && mode === "development" ? [] : [cloudflare()]),
       react(),
       tailwindcss()
     ],

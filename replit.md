@@ -10,15 +10,6 @@ The Chat Agent Starter Kit is a modern AI-powered chat application built on Clou
 
 # Recent Changes
 
-## September 20, 2025 - Initial Replit Setup
-- ✅ Installed all npm dependencies (458 packages)
-- ✅ Configured Vite development server for Replit environment (0.0.0.0:5000)
-- ✅ Modified vite.config.ts to disable Cloudflare plugin during development in Replit
-- ✅ Created .dev.vars file for OpenAI API key configuration
-- ✅ Set up Frontend workflow with npm start command
-- ✅ Added OpenAI JavaScript integration with proper package installation
-- ✅ Configured deployment settings for production environment
-- ⚠️ OpenAI API key needs to be configured by user for full functionality
 
 # User Preferences
 
@@ -81,7 +72,7 @@ Tools are defined in `tools.ts` with Zod schema validation for inputs. The syste
 
 # Cloudflare Best Practices Summary
 
-*Full guidelines available in `.cursor/rules/cloudflare.mdc` - MUST be consulted for any Cloudflare development*
+_Full guidelines available in `.cursor/rules/cloudflare.mdc` - MUST be consulted for any Cloudflare development_
 
 ## Code Standards
 
@@ -102,6 +93,7 @@ Tools are defined in `tools.ts` with Zod schema validation for inputs. The syste
 ## Cloudflare Service Integration
 
 **Storage & Data:**
+
 - **Workers KV**: Key-value storage for configuration, user profiles, A/B testing
 - **Durable Objects**: Strongly consistent state management, multiplayer coordination
 - **D1**: Relational data with SQL dialect
@@ -109,6 +101,7 @@ Tools are defined in `tools.ts` with Zod schema validation for inputs. The syste
 - **Hyperdrive**: Connect to existing PostgreSQL databases
 
 **Processing & AI:**
+
 - **Queues**: Asynchronous processing and background tasks
 - **Vectorize**: Store embeddings for vector search (with Workers AI)
 - **Workers AI**: Default AI API for inference (use official SDKs for Claude/OpenAI)
@@ -134,17 +127,18 @@ Tools are defined in `tools.ts` with Zod schema validation for inputs. The syste
 
 ## Security & Performance
 
-**Security:**
 - Implement proper request validation and security headers
 - Handle CORS correctly; implement rate limiting where appropriate
 - Follow least privilege principle for bindings; sanitize user inputs
 
 **Performance:**
+
 - Optimize for cold starts; minimize unnecessary computation
 - Use appropriate caching strategies; consider Workers limits and quotas
 - Implement streaming where beneficial
 
 **Error Handling:**
+
 - Implement proper error boundaries with meaningful error messages
 - Return appropriate HTTP status codes; log errors appropriately
 - Handle edge cases gracefully
@@ -152,16 +146,19 @@ Tools are defined in `tools.ts` with Zod schema validation for inputs. The syste
 # External Dependencies
 
 ## AI Services
+
 - **OpenAI API**: GPT-4 model access for chat responses and tool calling
 - **AI SDK**: Vercel's AI SDK for streaming, tool handling, and message management
 - **Cloudflare AI**: Integrated with Cloudflare's AI platform for model access
 
 ## Cloudflare Platform
+
 - **Cloudflare Workers**: Serverless edge computing runtime
 - **Durable Objects**: Persistent storage and state management for chat sessions
 - **Cloudflare AI Gateway**: Optional API gateway for OpenAI requests (configured but commented)
 
 ## Frontend Libraries
+
 - **React & React DOM**: v19 for UI framework
 - **Radix UI**: Accessible component primitives (avatar, dropdown-menu, slot, switch)
 - **TailwindCSS**: v4 for styling with custom configuration
@@ -171,6 +168,7 @@ Tools are defined in `tools.ts` with Zod schema validation for inputs. The syste
 - **Clsx & Tailwind Merge**: Utility for conditional CSS classes
 
 ## Development Tools
+
 - **TypeScript**: Type safety and developer experience
 - **Vite**: Build tool and development server
 - **Biome**: Linting and code formatting
@@ -178,6 +176,7 @@ Tools are defined in `tools.ts` with Zod schema validation for inputs. The syste
 - **Wrangler**: Cloudflare Workers CLI for deployment and development
 
 ## Runtime Environment
+
 - **Node.js**: Development environment
 - **Cloudflare Workers Runtime**: Production serverless environment
 - **Environment Variables**: OpenAI API key configuration via `.dev.vars`

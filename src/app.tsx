@@ -4,7 +4,6 @@ import { useAgent } from "agents/react";
 import { isToolUIPart } from "ai";
 import { useAgentChat } from "agents/ai-react";
 import type { UIMessage } from "@ai-sdk/react";
-import type { tools } from "./tools";
 
 // Component imports
 import { Button } from "@/components/button/Button";
@@ -14,6 +13,10 @@ import { Toggle } from "@/components/toggle/Toggle";
 import { Textarea } from "@/components/textarea/Textarea";
 import { MemoizedMarkdown } from "@/components/memoized-markdown";
 import { ToolInvocationCard } from "@/components/tool-invocation-card/ToolInvocationCard";
+import { ToolsPanel } from "@/components/tools/ToolsPanel";
+import { AgentConfigPanel } from "@/components/agent-config/AgentConfigPanel";
+import { useTools } from "@/hooks/useTools";
+import { cn } from "@/lib/utils";
 
 // Icon imports
 import {
@@ -23,14 +26,10 @@ import {
   Sun,
   Trash,
   PaperPlaneTilt,
-  Stop
+  Stop,
+  Wrench,
+  Gear
 } from "@phosphor-icons/react";
-
-// List of tools that require human confirmation
-// NOTE: this should match the tools that don't have execute functions in tools.ts
-const toolsRequiringConfirmation: (keyof typeof tools)[] = [
-  "getWeatherInformation"
-];
 
 export default function Chat() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
@@ -39,8 +38,27 @@ export default function Chat() {
     return (savedTheme as "dark" | "light") || "dark";
   });
   const [showDebug, setShowDebug] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"chat" | "tools" | "config">(
+    "chat"
+  );
   const [textareaHeight, setTextareaHeight] = useState("auto");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const {
+    tools: toolMetadata,
+    isLoading: isLoadingTools,
+    error: toolsError,
+    prompt: toolsPrompt,
+    refresh: refreshTools,
+    registerOpenApiSpec,
+    updateToolGuidance,
+    deleteTool,
+    confirmationToolNames
+  } = useTools();
+
+  const isToolsView = activeTab === "tools";
+  const isConfigView = activeTab === "config";
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -114,6 +132,13 @@ export default function Chat() {
     agent
   });
 
+  const handleStartNewChat = () => {
+    clearHistory();
+    setAgentInput("");
+    setActiveTab("chat");
+    setIsSidebarOpen(false);
+  };
+
   // Scroll to bottom when messages change
   useEffect(() => {
     agentMessages.length > 0 && scrollToBottom();
@@ -124,10 +149,7 @@ export default function Chat() {
       (part) =>
         isToolUIPart(part) &&
         part.state === "input-available" &&
-        // Manual check inside the component
-        toolsRequiringConfirmation.includes(
-          part.type.replace("tool-", "") as keyof typeof tools
-        )
+        confirmationToolNames.has(part.type.replace("tool-", ""))
     )
   );
 
@@ -135,11 +157,121 @@ export default function Chat() {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
+  const navButtonClass = (isActive: boolean) =>
+    `flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors ${
+      isActive
+        ? "border-neutral-200 bg-neutral-100 text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+        : "border-transparent text-neutral-700 hover:border-neutral-200 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:border-neutral-700 dark:hover:bg-neutral-800"
+    }`;
+
+  const headerTitle = isToolsView
+    ? "Tool Manager"
+    : isConfigView
+      ? "Agent Configuration"
+      : "AI Chat Agent";
+
+  const contentContainerClass =
+    isToolsView || isConfigView
+      ? "flex-1 overflow-y-auto p-4"
+      : "flex-1 overflow-y-auto p-4 space-y-4 pb-24 max-h-[calc(100vh-10rem)]";
+
+  const wrapperClass = cn(
+    "h-[100vh] w-full p-4 flex bg-fixed overflow-hidden",
+    isConfigView ? "justify-center items-start" : "justify-center items-center"
+  );
+
+  const mainContainerClass = cn(
+    "h-[calc(100vh-2rem)] w-full flex flex-col shadow-xl rounded-md overflow-hidden relative border border-neutral-300 dark:border-neutral-800",
+    isConfigView ? "max-w-full" : "mx-auto max-w-lg"
+  );
+
   return (
-    <div className="h-[100vh] w-full p-4 flex justify-center items-center bg-fixed overflow-hidden">
+    <div className={wrapperClass}>
       <HasOpenAIKey />
-      <div className="h-[calc(100vh-2rem)] w-full mx-auto max-w-lg flex flex-col shadow-xl rounded-md overflow-hidden relative border border-neutral-300 dark:border-neutral-800">
+      <div
+        className={`fixed inset-0 z-40 bg-black/30 transition-opacity duration-200 ${
+          isSidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+        onClick={() => setIsSidebarOpen(false)}
+        aria-hidden="true"
+      />
+      <aside
+        className={`fixed left-0 top-0 bottom-0 z-50 w-64 bg-white dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800 shadow-xl transform transition-transform duration-300 ease-in-out ${
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+        aria-label="Sidebar navigation"
+        id="sidebar-menu"
+      >
+        <div className="flex items-center justify-between px-4 py-4 border-b border-neutral-200 dark:border-neutral-800">
+          <h2 className="text-base font-semibold">Menu</h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsSidebarOpen(false)}
+            aria-label="Close menu"
+          >
+            Close
+          </Button>
+        </div>
+        <nav className="p-4 space-y-2">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("chat");
+              setIsSidebarOpen(false);
+            }}
+            className={navButtonClass(activeTab === "chat")}
+          >
+            <Robot size={18} />
+            Chat
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("tools");
+              setIsSidebarOpen(false);
+            }}
+            className={navButtonClass(activeTab === "tools")}
+          >
+            <Wrench size={18} />
+            Tools
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("config");
+              setIsSidebarOpen(false);
+            }}
+            className={navButtonClass(activeTab === "config")}
+          >
+            <Gear size={18} />
+            Agent config
+          </button>
+          <button
+            type="button"
+            onClick={handleStartNewChat}
+            disabled={isToolsView || isConfigView}
+            className={`${navButtonClass(false)} ${
+              isToolsView || isConfigView ? "opacity-60 cursor-not-allowed" : ""
+            }`}
+          >
+            <Robot size={18} />
+            Start new chat
+          </button>
+        </nav>
+      </aside>
+      <div className={mainContainerClass}>
         <div className="px-4 py-3 border-b border-neutral-300 dark:border-neutral-800 flex items-center gap-3 sticky top-0 z-10">
+          <Button
+            variant="ghost"
+            size="md"
+            onClick={() => setIsSidebarOpen(true)}
+            aria-expanded={isSidebarOpen}
+            aria-controls="sidebar-menu"
+            className="text-sm font-medium"
+          >
+            Menu
+          </Button>
           <div className="flex items-center justify-center h-8 w-8">
             <svg
               width="28px"
@@ -159,17 +291,19 @@ export default function Chat() {
           </div>
 
           <div className="flex-1">
-            <h2 className="font-semibold text-base">AI Chat Agent</h2>
+            <h2 className="font-semibold text-base">{headerTitle}</h2>
           </div>
 
-          <div className="flex items-center gap-2 mr-2">
-            <Bug size={16} />
-            <Toggle
-              toggled={showDebug}
-              aria-label="Toggle debug mode"
-              onClick={() => setShowDebug((prev) => !prev)}
-            />
-          </div>
+          {activeTab === "chat" && (
+            <div className="flex items-center gap-2 mr-2">
+              <Bug size={16} />
+              <Toggle
+                toggled={showDebug}
+                aria-label="Toggle debug mode"
+                onClick={() => setShowDebug((prev) => !prev)}
+              />
+            </div>
+          )}
 
           <Button
             variant="ghost"
@@ -181,236 +315,259 @@ export default function Chat() {
             {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}
           </Button>
 
-          <Button
-            variant="ghost"
-            size="md"
-            shape="square"
-            className="rounded-full h-9 w-9"
-            onClick={clearHistory}
-          >
-            <Trash size={20} />
-          </Button>
+          {activeTab === "chat" && (
+            <Button
+              variant="ghost"
+              size="md"
+              shape="square"
+              className="rounded-full h-9 w-9"
+              onClick={clearHistory}
+            >
+              <Trash size={20} />
+            </Button>
+          )}
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-24 max-h-[calc(100vh-10rem)]">
-          {agentMessages.length === 0 && (
-            <div className="h-full flex items-center justify-center">
-              <Card className="p-6 max-w-md mx-auto bg-neutral-100 dark:bg-neutral-900">
-                <div className="text-center space-y-4">
-                  <div className="bg-[#F48120]/10 text-[#F48120] rounded-full p-3 inline-flex">
-                    <Robot size={24} />
-                  </div>
-                  <h3 className="font-semibold text-lg">Welcome to AI Chat</h3>
-                  <p className="text-muted-foreground text-sm">
-                    Start a conversation with your AI assistant. Try asking
-                    about:
-                  </p>
-                  <ul className="text-sm text-left space-y-2">
-                    <li className="flex items-center gap-2">
-                      <span className="text-[#F48120]">•</span>
-                      <span>Weather information for any city</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="text-[#F48120]">•</span>
-                      <span>Local time in different locations</span>
-                    </li>
-                  </ul>
+        <div className={contentContainerClass}>
+          {isToolsView ? (
+            <ToolsPanel
+              tools={toolMetadata}
+              isLoading={isLoadingTools}
+              error={toolsError}
+              prompt={toolsPrompt}
+              onRefresh={refreshTools}
+              onRegister={registerOpenApiSpec}
+              onUpdateGuidance={updateToolGuidance}
+              onDeleteTool={deleteTool}
+            />
+          ) : isConfigView ? (
+            <AgentConfigPanel />
+          ) : (
+            <>
+              {agentMessages.length === 0 && (
+                <div className="h-full flex items-center justify-center">
+                  <Card className="p-6 max-w-md mx-auto bg-neutral-100 dark:bg-neutral-900">
+                    <div className="text-center space-y-4">
+                      <div className="bg-[#F48120]/10 text-[#F48120] rounded-full p-3 inline-flex">
+                        <Robot size={24} />
+                      </div>
+                      <h3 className="font-semibold text-lg">
+                        Welcome to AI Chat
+                      </h3>
+                      <p className="text-muted-foreground text-sm">
+                        Start a conversation with your AI assistant. Try asking
+                        about:
+                      </p>
+                      <ul className="text-sm text-left space-y-2">
+                        <li className="flex items-center gap-2">
+                          <span className="text-[#F48120]">•</span>
+                          <span>Weather information for any city</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="text-[#F48120]">•</span>
+                          <span>Local time in different locations</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </Card>
                 </div>
-              </Card>
-            </div>
-          )}
+              )}
 
-          {agentMessages.map((m, index) => {
-            const isUser = m.role === "user";
-            const showAvatar =
-              index === 0 || agentMessages[index - 1]?.role !== m.role;
+              {agentMessages.map((m, index) => {
+                const isUser = m.role === "user";
+                const showAvatar =
+                  index === 0 || agentMessages[index - 1]?.role !== m.role;
 
-            return (
-              <div key={m.id}>
-                {showDebug && (
-                  <pre className="text-xs text-muted-foreground overflow-scroll">
-                    {JSON.stringify(m, null, 2)}
-                  </pre>
-                )}
-                <div
-                  className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-                >
-                  <div
-                    className={`flex gap-2 max-w-[85%] ${
-                      isUser ? "flex-row-reverse" : "flex-row"
-                    }`}
-                  >
-                    {showAvatar && !isUser ? (
-                      <Avatar username={"AI"} />
-                    ) : (
-                      !isUser && <div className="w-8" />
+                return (
+                  <div key={m.id}>
+                    {showDebug && (
+                      <pre className="text-xs text-muted-foreground overflow-scroll">
+                        {JSON.stringify(m, null, 2)}
+                      </pre>
                     )}
+                    <div
+                      className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+                    >
+                      <div
+                        className={`flex gap-2 max-w-[85%] ${
+                          isUser ? "flex-row-reverse" : "flex-row"
+                        }`}
+                      >
+                        {showAvatar && !isUser ? (
+                          <Avatar username={"AI"} />
+                        ) : (
+                          !isUser && <div className="w-8" />
+                        )}
 
-                    <div>
-                      <div>
-                        {m.parts?.map((part, i) => {
-                          if (part.type === "text") {
-                            return (
-                              // biome-ignore lint/suspicious/noArrayIndexKey: immutable index
-                              <div key={i}>
-                                <Card
-                                  className={`p-3 rounded-md bg-neutral-100 dark:bg-neutral-900 ${
-                                    isUser
-                                      ? "rounded-br-none"
-                                      : "rounded-bl-none border-assistant-border"
-                                  } ${
-                                    part.text.startsWith("scheduled message")
-                                      ? "border-accent/50"
-                                      : ""
-                                  } relative`}
-                                >
-                                  {part.text.startsWith(
-                                    "scheduled message"
-                                  ) && (
-                                    <span className="absolute -top-3 -left-2 text-base">
-                                      🕒
-                                    </span>
-                                  )}
-                                  <MemoizedMarkdown
-                                    id={`${m.id}-${i}`}
-                                    content={part.text.replace(
-                                      /^scheduled message: /,
-                                      ""
-                                    )}
+                        <div>
+                          <div>
+                            {m.parts?.map((part, i) => {
+                              if (part.type === "text") {
+                                return (
+                                  // biome-ignore lint/suspicious/noArrayIndexKey: immutable index
+                                  <div key={i}>
+                                    <Card
+                                      className={`p-3 rounded-md bg-neutral-100 dark:bg-neutral-900 ${
+                                        isUser
+                                          ? "rounded-br-none"
+                                          : "rounded-bl-none border-assistant-border"
+                                      } ${
+                                        part.text.startsWith(
+                                          "scheduled message"
+                                        )
+                                          ? "border-accent/50"
+                                          : ""
+                                      } relative`}
+                                    >
+                                      {part.text.startsWith(
+                                        "scheduled message"
+                                      ) && (
+                                        <span className="absolute -top-3 -left-2 text-base">
+                                          🕒
+                                        </span>
+                                      )}
+                                      <MemoizedMarkdown
+                                        id={`${m.id}-${i}`}
+                                        content={part.text.replace(
+                                          /^scheduled message: /,
+                                          ""
+                                        )}
+                                      />
+                                    </Card>
+                                    <p
+                                      className={`text-xs text-muted-foreground mt-1 ${
+                                        isUser ? "text-right" : "text-left"
+                                      }`}
+                                    >
+                                      {formatTime(
+                                        m.metadata?.createdAt
+                                          ? new Date(m.metadata.createdAt)
+                                          : new Date()
+                                      )}
+                                    </p>
+                                  </div>
+                                );
+                              }
+
+                              if (isToolUIPart(part)) {
+                                const toolCallId = part.toolCallId;
+                                const toolName = part.type.replace("tool-", "");
+                                const needsConfirmation =
+                                  confirmationToolNames.has(toolName);
+
+                                // Skip rendering the card in debug mode
+                                if (showDebug) return null;
+
+                                return (
+                                  <ToolInvocationCard
+                                    // biome-ignore lint/suspicious/noArrayIndexKey: using index is safe here as the array is static
+                                    key={`${toolCallId}-${i}`}
+                                    toolUIPart={part}
+                                    toolCallId={toolCallId}
+                                    needsConfirmation={needsConfirmation}
+                                    onSubmit={({ toolCallId, result }) => {
+                                      addToolResult({
+                                        tool: part.type.replace("tool-", ""),
+                                        toolCallId,
+                                        output: result
+                                      });
+                                    }}
+                                    addToolResult={(toolCallId, result) => {
+                                      addToolResult({
+                                        tool: part.type.replace("tool-", ""),
+                                        toolCallId,
+                                        output: result
+                                      });
+                                    }}
                                   />
-                                </Card>
-                                <p
-                                  className={`text-xs text-muted-foreground mt-1 ${
-                                    isUser ? "text-right" : "text-left"
-                                  }`}
-                                >
-                                  {formatTime(
-                                    m.metadata?.createdAt
-                                      ? new Date(m.metadata.createdAt)
-                                      : new Date()
-                                  )}
-                                </p>
-                              </div>
-                            );
-                          }
-
-                          if (isToolUIPart(part)) {
-                            const toolCallId = part.toolCallId;
-                            const toolName = part.type.replace("tool-", "");
-                            const needsConfirmation =
-                              toolsRequiringConfirmation.includes(
-                                toolName as keyof typeof tools
-                              );
-
-                            // Skip rendering the card in debug mode
-                            if (showDebug) return null;
-
-                            return (
-                              <ToolInvocationCard
-                                // biome-ignore lint/suspicious/noArrayIndexKey: using index is safe here as the array is static
-                                key={`${toolCallId}-${i}`}
-                                toolUIPart={part}
-                                toolCallId={toolCallId}
-                                needsConfirmation={needsConfirmation}
-                                onSubmit={({ toolCallId, result }) => {
-                                  addToolResult({
-                                    tool: part.type.replace("tool-", ""),
-                                    toolCallId,
-                                    output: result
-                                  });
-                                }}
-                                addToolResult={(toolCallId, result) => {
-                                  addToolResult({
-                                    tool: part.type.replace("tool-", ""),
-                                    toolCallId,
-                                    output: result
-                                  });
-                                }}
-                              />
-                            );
-                          }
-                          return null;
-                        })}
+                                );
+                              }
+                              return null;
+                            })}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-          <div ref={messagesEndRef} />
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </>
+          )}
         </div>
 
-        {/* Input Area */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleAgentSubmit(e, {
-              annotations: {
-                hello: "world"
-              }
-            });
-            setTextareaHeight("auto"); // Reset height after submission
-          }}
-          className="p-3 bg-neutral-50 absolute bottom-0 left-0 right-0 z-10 border-t border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900"
-        >
-          <div className="flex items-center gap-2">
-            <div className="flex-1 relative">
-              <Textarea
-                disabled={pendingToolCallConfirmation}
-                placeholder={
-                  pendingToolCallConfirmation
-                    ? "Please respond to the tool confirmation above..."
-                    : "Send a message..."
+        {!isToolsView && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleAgentSubmit(e, {
+                annotations: {
+                  hello: "world"
                 }
-                className="flex w-full border border-neutral-200 dark:border-neutral-700 px-3 py-2  ring-offset-background placeholder:text-neutral-500 dark:placeholder:text-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300 dark:focus-visible:ring-neutral-700 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-neutral-900 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm min-h-[24px] max-h-[calc(75dvh)] overflow-hidden resize-none rounded-2xl !text-base pb-10 dark:bg-neutral-900"
-                value={agentInput}
-                onChange={(e) => {
-                  handleAgentInputChange(e);
-                  // Auto-resize the textarea
-                  e.target.style.height = "auto";
-                  e.target.style.height = `${e.target.scrollHeight}px`;
-                  setTextareaHeight(`${e.target.scrollHeight}px`);
-                }}
-                onKeyDown={(e) => {
-                  if (
-                    e.key === "Enter" &&
-                    !e.shiftKey &&
-                    !e.nativeEvent.isComposing
-                  ) {
-                    e.preventDefault();
-                    handleAgentSubmit(e as unknown as React.FormEvent);
-                    setTextareaHeight("auto"); // Reset height on Enter submission
+              });
+              setTextareaHeight("auto"); // Reset height after submission
+            }}
+            className="p-3 bg-neutral-50 absolute bottom-0 left-0 right-0 z-10 border-t border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900"
+          >
+            <div className="flex items-center gap-2">
+              <div className="flex-1 relative">
+                <Textarea
+                  disabled={pendingToolCallConfirmation}
+                  placeholder={
+                    pendingToolCallConfirmation
+                      ? "Please respond to the tool confirmation above..."
+                      : "Send a message..."
                   }
-                }}
-                rows={2}
-                style={{ height: textareaHeight }}
-              />
-              <div className="absolute bottom-0 right-0 p-2 w-fit flex flex-row justify-end">
-                {status === "submitted" || status === "streaming" ? (
-                  <button
-                    type="button"
-                    onClick={stop}
-                    className="inline-flex items-center cursor-pointer justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-1.5 h-fit border border-neutral-200 dark:border-neutral-800"
-                    aria-label="Stop generation"
-                  >
-                    <Stop size={16} />
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    className="inline-flex items-center cursor-pointer justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-1.5 h-fit border border-neutral-200 dark:border-neutral-800"
-                    disabled={pendingToolCallConfirmation || !agentInput.trim()}
-                    aria-label="Send message"
-                  >
-                    <PaperPlaneTilt size={16} />
-                  </button>
-                )}
+                  className="flex w-full border border-neutral-200 dark:border-neutral-700 px-3 py-2  ring-offset-background placeholder:text-neutral-500 dark:placeholder:text-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-300 dark:focus-visible:ring-neutral-700 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-neutral-900 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm min-h-[24px] max-h-[calc(75dvh)] overflow-hidden resize-none rounded-2xl !text-base pb-10 dark:bg-neutral-900"
+                  value={agentInput}
+                  onChange={(e) => {
+                    handleAgentInputChange(e);
+                    // Auto-resize the textarea
+                    e.target.style.height = "auto";
+                    e.target.style.height = `${e.target.scrollHeight}px`;
+                    setTextareaHeight(`${e.target.scrollHeight}px`);
+                  }}
+                  onKeyDown={(e) => {
+                    if (
+                      e.key === "Enter" &&
+                      !e.shiftKey &&
+                      !e.nativeEvent.isComposing
+                    ) {
+                      e.preventDefault();
+                      handleAgentSubmit(e as unknown as React.FormEvent);
+                      setTextareaHeight("auto"); // Reset height on Enter submission
+                    }
+                  }}
+                  rows={2}
+                  style={{ height: textareaHeight }}
+                />
+                <div className="absolute bottom-0 right-0 p-2 w-fit flex flex-row justify-end">
+                  {status === "submitted" || status === "streaming" ? (
+                    <button
+                      type="button"
+                      onClick={stop}
+                      className="inline-flex items-center cursor-pointer justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-1.5 h-fit border border-neutral-200 dark:border-neutral-800"
+                      aria-label="Stop generation"
+                    >
+                      <Stop size={16} />
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      className="inline-flex items-center cursor-pointer justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full p-1.5 h-fit border border-neutral-200 dark:border-neutral-800"
+                      disabled={
+                        pendingToolCallConfirmation || !agentInput.trim()
+                      }
+                      aria-label="Send message"
+                    >
+                      <PaperPlaneTilt size={16} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        </form>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -420,7 +577,9 @@ const hasOpenAiKeyPromise = fetch("/check-open-ai-key")
   .then((res) => res.json<{ success: boolean }>())
   .catch(() => {
     // In Replit development mode, assume API key is configured since backend endpoint isn't available
-    const isReplit = import.meta.env.VITE_REPL_ID !== undefined || window.location.hostname.includes('replit.dev');
+    const isReplit =
+      import.meta.env.VITE_REPL_ID !== undefined ||
+      window.location.hostname.includes("replit.dev");
     return { success: isReplit };
   });
 
