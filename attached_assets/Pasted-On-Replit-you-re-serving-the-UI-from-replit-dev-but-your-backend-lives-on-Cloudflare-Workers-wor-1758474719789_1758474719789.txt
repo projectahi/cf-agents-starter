@@ -1,0 +1,72 @@
+On Replit you’re serving the UI from …replit.dev, but your backend lives on Cloudflare Workers (…workers.dev or a custom domain). If your client uses a relative URL like /ws, it tries to open a socket on the Replit origin (where no /ws route exists), so the socket closes and you see nothing.
+
+Quick fix (pick one)
+Option A — Point directly at the Worker (recommended with vite preview)
+
+Add a config var for the WS base:
+
+In Replit’s Secrets (or .env), set:
+
+VITE_WS_BASE=wss://YOUR_WORKER.subdomain.workers.dev
+
+
+Use it in your client:
+
+const base = import.meta.env.VITE_WS_BASE
+  ?? `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+const ws = new WebSocket(`${base}/ws`);
+
+Option B — Dev proxy through Vite (only if you’re running vite dev)
+
+If you prefer vite dev (not vite preview), add a proxy so /ws hits your Worker:
+
+// vite.config.ts
+server: {
+  host: "0.0.0.0",
+  allowedHosts: true,
+  hmr: { protocol: "wss", clientPort: 443 },
+  proxy: {
+    "/ws": {
+      target: "https://YOUR_WORKER.subdomain.workers.dev",
+      changeOrigin: true,
+      ws: true,
+      secure: true,
+    }
+  }
+}
+
+
+Then your client can keep new WebSocket(${scheme}://${location.host}/ws).
+
+Sanity checks (takes 60 seconds)
+
+In the browser DevTools → Network → WS, try:
+
+new WebSocket('wss://YOUR_WORKER.subdomain.workers.dev/ws')
+
+You should see a 101 Switching Protocols and the WS stay Open.
+
+If it doesn’t open:
+
+Confirm your Worker route exists at /ws and calls WebSocketPair() + server.accept().
+
+If you use auth cookies, remember Replit runs in an iframe → use header/token or set cookies Secure; SameSite=None.
+
+Add loud logs temporarily:
+
+Client:
+
+ws.onopen = () => console.log("WS open");
+ws.onmessage = e => console.log("WS msg:", e.data);
+ws.onclose = e => console.log("WS closed", e.code, e.reason);
+ws.onerror = e => console.error("WS error", e);
+
+
+Worker:
+
+console.log("accepted ws") after server.accept()
+
+echo a greeting on connect to prove the pipe:
+
+server.accept();
+server.send("👋 hello from worker");

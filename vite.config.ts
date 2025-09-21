@@ -14,6 +14,20 @@ export default defineConfig(() => ({
     hmr: {
       protocol: "wss",
       clientPort: 443
+    },
+    proxy: {
+      "/api": {
+        target: process.env.VITE_WORKER_URL || "http://localhost:8000",
+        changeOrigin: true,
+        ws: true,
+        secure: false
+      },
+      "/_cf-agents": {
+        target: process.env.VITE_WORKER_URL || "http://localhost:8000",
+        changeOrigin: true,
+        ws: true,
+        secure: false
+      }
     }
   }
 }));
