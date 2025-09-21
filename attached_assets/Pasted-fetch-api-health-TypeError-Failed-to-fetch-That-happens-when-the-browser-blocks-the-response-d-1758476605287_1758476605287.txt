@@ -1,0 +1,102 @@
+fetch(…/api/health) → TypeError: Failed to fetch
+That happens when the browser blocks the response due to missing CORS headers (even for simple GETs).
+
+new WebSocket('wss://…/ws') → WS error
+That’s almost always the /ws route not upgrading (404/400), or it upgrades but never accept()/sends.
+
+Do this minimal patch on your Worker, redeploy, and re-test:
+
+1) Worker: add CORS, /api/health, and a proven /ws
+// src/worker.ts
+const CORS = {
+  'Access-Control-Allow-Origin': '*',                // or your exact https://*.replit.dev
+  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+export default {
+  async fetch(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+
+    // CORS preflight
+    if (req.method === 'OPTIONS') {
+      return new Response(null, { headers: CORS });
+    }
+
+    if (url.pathname === '/api/health') {
+      return new Response('ok', { headers: { ...CORS, 'Content-Type': 'text/plain' } });
+    }
+
+    if (url.pathname === '/ws') {
+      const upgrade = req.headers.get('Upgrade') || '';
+      if (upgrade.toLowerCase() !== 'websocket') {
+        return new Response('Expected websocket', { status: 400, headers: CORS });
+      }
+
+      const pair = new WebSocketPair();
+      const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+
+      server.accept();
+      // prove the pipe works immediately:
+      server.send('👋 hello from worker');
+      server.addEventListener('message', (evt) => server.send(`echo: ${evt.data}`));
+
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
+    return new Response('not found', { status: 404, headers: CORS });
+  }
+} satisfies ExportedHandler;
+
+2) wrangler.toml basics (double-check)
+name = "cf-agents-starter-one"
+main = "src/worker.ts"
+compatibility_date = "2024-11-21"
+workers_dev = true
+
+
+Then:
+
+wrangler deploy
+
+3) Verify from your browser console (again)
+// should print "ok"
+fetch('https://cf-agents-starter-one.jd-ad0.workers.dev/api/health')
+  .then(r => r.text()).then(console.log).catch(console.error);
+
+// should log "WS open" then "👋 hello from worker"
+const ws = new WebSocket('wss://cf-agents-starter-one.jd-ad0.workers.dev/ws');
+ws.onopen = () => console.log('WS open');
+ws.onmessage = e => console.log('WS msg:', e.data);
+ws.onerror = e => console.error('WS error', e);
+ws.onclose = e => console.log('WS closed', e.code, e.reason);
+
+
+If either still fails, run:
+
+wrangler tail --format=pretty
+
+
+and attempt the requests; if there are no logs, you’re hitting the wrong worker/domain or the routes aren’t deployed. If there are logs, the status code there will tell us exactly what’s wrong.
+
+4) Point your frontend only at the Worker base
+
+Make sure all calls use the env var (no relative /api or /ws):
+
+const BASE = import.meta.env.VITE_WORKER_URL!; // https://cf-agents-starter-one.jd-ad0.workers.dev
+export const api = (p: string, init?: RequestInit) => fetch(`${BASE}${p}`, init);
+export const WS_URL = `${BASE.replace(/^http/, 'ws')}/ws`;
+
+
+Then use:
+
+await api('/api/chat', {...});
+const ws = new WebSocket(WS_URL);
+
+Why your errors looked like that
+
+“Failed to fetch”: the browser received a response but blocked access because Access-Control-Allow-Origin was missing. Adding CORS (and handling OPTIONS) fixes it.
+
+WS error event: the Worker either didn’t have /ws, didn’t upgrade, or didn’t accept()/send. The snippet above guarantees a visible greeting frame so you can confirm the pipe.
+
+Apply the patch, redeploy, run the two console tests; once you see ok and the 👋 message, your chat UI will start receiving responses.

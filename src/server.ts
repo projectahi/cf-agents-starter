@@ -1,5 +1,12 @@
 import { routeAgentRequest, type Schedule } from "agents";
 
+// CORS headers for all responses
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
 import { getSchedulePrompt } from "agents/schedule";
 
 import { AIChatAgent } from "agents/ai-chat-agent";
@@ -754,6 +761,32 @@ ${scheduleInstruction}${toolsSection}`;
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext) {
     const url = new URL(request.url);
+
+    // CORS preflight
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: CORS });
+    }
+
+    if (url.pathname === '/api/health') {
+      return new Response('ok', { headers: { ...CORS, 'Content-Type': 'text/plain' } });
+    }
+
+    if (url.pathname === '/ws') {
+      const upgrade = request.headers.get('Upgrade') || '';
+      if (upgrade.toLowerCase() !== 'websocket') {
+        return new Response('Expected websocket', { status: 400, headers: CORS });
+      }
+
+      const pair = new WebSocketPair();
+      const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
+
+      server.accept();
+      // prove the pipe works immediately:
+      server.send('👋 hello from worker');
+      server.addEventListener('message', (evt) => server.send(`echo: ${evt.data}`));
+
+      return new Response(null, { status: 101, webSocket: client });
+    }
 
     if (url.pathname === "/check-open-ai-key") {
       const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
