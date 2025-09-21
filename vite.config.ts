@@ -10,6 +10,7 @@ export default defineConfig(() => ({
   server: {
     host: "0.0.0.0",
     port: 5000,
+    allowedHosts: true as const,        // <-- allow Replit's dynamic host
     hmr: {
       protocol: "wss",
       clientPort: 443
