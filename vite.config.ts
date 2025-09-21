@@ -5,12 +5,10 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig(({ mode }) => {
-  const isReplit = process.env.REPL_ID !== undefined;
-
   return {
     plugins: [
-      // For Replit environment, we'll disable cloudflare plugin during development
-      ...(isReplit && mode === "development" ? [] : [cloudflare()]),
+      // Enable cloudflare plugin in all modes for proper Workers runtime
+      cloudflare(),
       react(),
       tailwindcss()
     ],
