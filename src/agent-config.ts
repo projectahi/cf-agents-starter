@@ -40,6 +40,7 @@ export const agentProfileSchema = z.object({
   behavior: z.string().min(1, "Agent behavior is required"),
   config: agentConfigSchema,
   toolNames: z.array(z.string().min(1)).nullable().default(null),
+  handoffAgentIds: z.array(z.string().min(1)).default([]),
   createdAt: z
     .string()
     .datetime({ message: "createdAt must be an ISO timestamp" }),
@@ -54,14 +55,16 @@ const agentProfileInputSchema = z.object({
   name: z.string().min(1, "Agent name is required"),
   behavior: z.string().min(1, "Agent behavior is required"),
   config: agentConfigUpdateSchema.optional(),
-  toolNames: z.array(z.string().min(1)).nullable().optional()
+  toolNames: z.array(z.string().min(1)).nullable().optional(),
+  handoffAgentIds: z.array(z.string().min(1)).optional()
 });
 
 const agentProfileUpdateSchema = z.object({
   name: z.string().min(1, "Agent name is required").optional(),
   behavior: z.string().min(1, "Agent behavior is required").optional(),
   config: agentConfigUpdateSchema.optional(),
-  toolNames: z.array(z.string().min(1)).nullable().optional()
+  toolNames: z.array(z.string().min(1)).nullable().optional(),
+  handoffAgentIds: z.array(z.string().min(1)).optional()
 });
 
 export type AgentProfileInput = z.infer<typeof agentProfileInputSchema>;
@@ -112,6 +115,7 @@ export function createAgentProfile(
     behavior: input.behavior,
     config,
     toolNames: input.toolNames ?? null,
+    handoffAgentIds: input.handoffAgentIds ?? [],
     createdAt: now,
     updatedAt: now
   });
@@ -140,6 +144,10 @@ export function mergeAgentProfile(
       update.toolNames !== undefined
         ? (update.toolNames ?? null)
         : profile.toolNames,
+    handoffAgentIds:
+      update.handoffAgentIds !== undefined
+        ? update.handoffAgentIds
+        : profile.handoffAgentIds,
     updatedAt: new Date().toISOString()
   });
 }
@@ -150,7 +158,8 @@ export function createDefaultAgentProfile(): AgentProfile {
     name: "General Assistant",
     behavior: "Helpful general-purpose assistant",
     config: {},
-    toolNames: null
+    toolNames: null,
+    handoffAgentIds: []
   });
 }
 

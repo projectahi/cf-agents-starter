@@ -25,13 +25,27 @@ const AvatarComponent = ({
   toggled,
   username
 }: AvatarProps) => {
-  const firstInitial = username.charAt(0).toUpperCase();
+  const normalizedName = username.trim();
+  const initials =
+    normalizedName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || normalizedName.charAt(0).toUpperCase();
+
+  const sizeClass =
+    size === "sm"
+      ? "h-8 w-8 text-xs"
+      : size === "md"
+        ? "h-9 w-9 text-sm"
+        : "h-10 w-10 text-sm";
 
   return (
     <Slot
       as={as ?? "div"}
       className={cn(
-        "btn btn-secondary circular add-focus relative overflow-hidden",
+        "btn btn-secondary circular add-focus relative overflow-hidden flex items-center justify-center",
         {
           "add-size-sm": size === "sm",
           "add-size-md": size === "md",
@@ -42,6 +56,7 @@ const AvatarComponent = ({
           "after:opacity-100": image && toggled,
           toggle: !image && toggled
         },
+        sizeClass,
         className
       )}
       href={href}
@@ -57,7 +72,7 @@ const AvatarComponent = ({
           alt={username}
         />
       ) : (
-        <p className="text-100 font-bold">{firstInitial}</p>
+        <span className="text-100 font-bold leading-none">{initials}</span>
       )}
     </Slot>
   );

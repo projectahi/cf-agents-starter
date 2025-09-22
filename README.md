@@ -46,8 +46,16 @@ OPENAI_API_KEY=your_openai_api_key
 4. Run locally:
 
 ```bash
+# Terminal 1: run the Worker against the remote development environment
+npm run worker:dev
+
+# Terminal 2: start the Vite development server for the UI
 npm start
 ```
+
+Running the Worker with `wrangler dev --remote` ensures the same Durable Object
+instance—and therefore your agent and tool database—persists across reloads
+during development.
 
 5. Deploy:
 

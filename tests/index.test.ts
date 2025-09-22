@@ -44,10 +44,13 @@ describe("Chat worker", () => {
       "scheduleTask"
     );
 
+    const defaultAgentId = String(initial.json.activeAgent.id);
+
     const createBody = {
       name: "Specialist",
       behavior: "Focus on quick lookups only",
       toolNames: ["getLocalTime", "scheduleTask"],
+      handoffAgentIds: [defaultAgentId],
       setActive: true
     } satisfies Record<string, unknown>;
     const created = await fetchJSON("/api/agents", {
@@ -60,6 +63,7 @@ describe("Chat worker", () => {
       "getLocalTime",
       "scheduleTask"
     ]);
+    expect(created.json.agent.handoffAgentIds).toEqual([defaultAgentId]);
     expect(created.json.activeAgent?.id).toBe(created.json.agent.id);
 
     const configAfterCreate = await fetchJSON("/api/agent-config");
@@ -67,6 +71,9 @@ describe("Chat worker", () => {
     expect(configAfterCreate.json.agent.toolNames).toEqual([
       "getLocalTime",
       "scheduleTask"
+    ]);
+    expect(configAfterCreate.json.agent.handoffAgentIds).toEqual([
+      defaultAgentId
     ]);
     expect(configAfterCreate.json.effectiveToolNames.sort()).toEqual([
       "getLocalTime",
@@ -77,15 +84,20 @@ describe("Chat worker", () => {
     const update = await fetchJSON(`/api/agents/${agentId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ toolNames: ["getLocalTime"] })
+      body: JSON.stringify({
+        toolNames: ["getLocalTime"],
+        handoffAgentIds: []
+      })
     });
     expect(update.response.status).toBe(200);
     expect(update.json.agent.toolNames).toEqual(["getLocalTime"]);
+    expect(update.json.agent.handoffAgentIds).toEqual([]);
 
     const configAfterUpdate = await fetchJSON("/api/agent-config");
     expect(configAfterUpdate.response.status).toBe(200);
     expect(configAfterUpdate.json.agent.toolNames).toEqual(["getLocalTime"]);
     expect(configAfterUpdate.json.effectiveToolNames).toEqual(["getLocalTime"]);
+    expect(configAfterUpdate.json.agent.handoffAgentIds).toEqual([]);
 
     const allowAll = await fetchJSON(`/api/agents/${agentId}`, {
       method: "PATCH",

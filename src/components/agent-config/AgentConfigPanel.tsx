@@ -9,22 +9,14 @@ import {
 
 import { useAgent } from "agents/react";
 import { useAgentChat } from "agents/ai-react";
-import { isToolUIPart } from "ai";
 import type { UIMessage } from "@ai-sdk/react";
-import {
-  ArrowLeft,
-  PaperPlaneTilt,
-  PencilSimple,
-  Plus,
-  Stop
-} from "@phosphor-icons/react";
+import { ArrowLeft, PencilSimple, Plus } from "@phosphor-icons/react";
 
-import { defaultAgentConfig } from "@/agent-config";
+import { defaultAgentConfig, type AgentProfile } from "@/agent-config";
 import { Button } from "@/components/button/Button";
 import { Card } from "@/components/card/Card";
-import { MemoizedMarkdown } from "@/components/memoized-markdown";
+import { AgentChatWindow } from "@/components/agent-chat/AgentChatWindow";
 import { Textarea } from "@/components/textarea/Textarea";
-import { ToolInvocationCard } from "@/components/tool-invocation-card/ToolInvocationCard";
 import {
   useAgentConfig,
   type AgentConfigUpdate,
@@ -32,7 +24,7 @@ import {
   type UpdateAgentInput
 } from "@/hooks/useAgentConfig";
 import { useTools } from "@/hooks/useTools";
-import { cn } from "@/lib/utils";
+import type { ChatMessageMetadata } from "@/shared";
 
 function clampTemperature(value: number) {
   if (!Number.isFinite(value)) return 0;
@@ -71,10 +63,8 @@ function AgentChatPreview({
 }: AgentChatPreviewProps) {
   const agent = useAgent({ agent: "chat" });
   const { messages, addToolResult, clearHistory, status, sendMessage, stop } =
-    useAgentChat<unknown, UIMessage<{ createdAt: string }>>({ agent });
+    useAgentChat<unknown, UIMessage<ChatMessageMetadata>>({ agent });
 
-  const [input, setInput] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const previousAgentKeyRef = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
@@ -85,35 +75,30 @@ function AgentChatPreview({
 
     if (previousAgentKeyRef.current !== agentKey) {
       clearHistory();
-      setInput("");
       previousAgentKeyRef.current = agentKey ?? null;
     }
   }, [agentKey, clearHistory, disabled]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  });
-
-  const pendingToolCallConfirmation = messages.some((m) =>
-    m.parts?.some((part) => {
-      if (!isToolUIPart(part)) return false;
-      const toolName = part.type.replace("tool-", "");
-      return (
-        part.state === "input-available" && confirmationToolNames.has(toolName)
-      );
-    })
+  const handleSendMessage = useCallback(
+    async (text: string, _trigger: "submit" | "enter") => {
+      await sendMessage({
+        role: "user",
+        parts: [{ type: "text", text }]
+      });
+    },
+    [sendMessage]
   );
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!input.trim()) return;
-    const content = input;
-    setInput("");
-    await sendMessage({
-      role: "user",
-      parts: [{ type: "text", text: content }]
-    });
-  };
+  const emptyState = disabled ? (
+    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      <p>Save the agent first to start testing in chat.</p>
+    </div>
+  ) : (
+    <div className="rounded-md border border-dashed border-border/70 bg-background p-4 text-sm text-muted-foreground">
+      Start a conversation to see how this agent behaves with the current
+      configuration.
+    </div>
+  );
 
   return (
     <Card className="flex h-full flex-col overflow-hidden border border-border/80">
@@ -132,153 +117,29 @@ function AgentChatPreview({
             disabled={disabled}
             onClick={() => {
               clearHistory();
-              setInput("");
             }}
           >
             Clear
           </Button>
-          {status === "streaming" && (
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              onClick={() => stop()}
-            >
-              <Stop size={14} />
-              Stop
-            </Button>
-          )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-background/60">
-        {disabled ? (
-          <div className="flex h-full min-h-[240px] w-full flex-col items-center justify-center text-center text-sm text-muted-foreground">
-            <p>Save the agent first to start testing in chat.</p>
-          </div>
-        ) : (
-          <>
-            {messages.length === 0 && (
-              <div className="rounded-md border border-dashed border-border/70 bg-background p-4 text-sm text-muted-foreground">
-                Start a conversation to see how this agent behaves with the
-                current configuration.
-              </div>
-            )}
-
-            {messages.map((message) => {
-              const isUser = message.role === "user";
-              return (
-                <div key={message.id} className="space-y-2">
-                  <div
-                    className={cn(
-                      "flex w-full",
-                      isUser ? "justify-end" : "justify-start"
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "max-w-[80%] space-y-2",
-                        isUser ? "items-end" : "items-start"
-                      )}
-                    >
-                      {message.parts?.map((part, index) => {
-                        if (part.type === "text") {
-                          return (
-                            <Card
-                              key={`${message.id}-text-${index}`}
-                              className={cn(
-                                "rounded-2xl px-4 py-3 text-sm shadow-sm",
-                                isUser
-                                  ? "bg-primary text-primary-foreground"
-                                  : "bg-background"
-                              )}
-                            >
-                              <MemoizedMarkdown
-                                id={`${message.id}-${index}`}
-                                content={part.text}
-                              />
-                            </Card>
-                          );
-                        }
-
-                        if (isToolUIPart(part)) {
-                          const toolName = part.type.replace("tool-", "");
-                          const needsConfirmation =
-                            confirmationToolNames.has(toolName);
-                          return (
-                            <ToolInvocationCard
-                              key={`${message.id}-tool-${index}`}
-                              toolUIPart={part}
-                              toolCallId={part.toolCallId}
-                              needsConfirmation={needsConfirmation}
-                              onSubmit={({ toolCallId, result }) => {
-                                addToolResult({
-                                  tool: toolName,
-                                  toolCallId,
-                                  output: result
-                                });
-                              }}
-                              addToolResult={(toolCallId, result) => {
-                                addToolResult({
-                                  tool: toolName,
-                                  toolCallId,
-                                  output: result
-                                });
-                              }}
-                            />
-                          );
-                        }
-
-                        return null;
-                      })}
-
-                      <p className="text-xs text-muted-foreground">
-                        {formatTime(
-                          message.metadata?.createdAt
-                            ? new Date(message.metadata.createdAt)
-                            : new Date()
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            <div ref={messagesEndRef} />
-          </>
-        )}
-      </div>
-
-      <form
-        onSubmit={handleSubmit}
-        className="border-t border-border/70 bg-background px-4 py-3"
-      >
-        <div className="flex items-end gap-2">
-          <Textarea
-            disabled={disabled || pendingToolCallConfirmation}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder={
-              disabled
-                ? "Create this agent to start chatting"
-                : pendingToolCallConfirmation
-                  ? "Please respond to the tool confirmation above..."
-                  : "Send a test message"
-            }
-            rows={2}
-            className="min-h-[64px] flex-1 resize-none"
-          />
-          <Button
-            type="submit"
-            variant="primary"
-            size="sm"
-            disabled={disabled || !input.trim()}
-          >
-            <PaperPlaneTilt size={16} />
-          </Button>
-        </div>
-      </form>
+      <AgentChatWindow
+        messages={messages}
+        status={status}
+        confirmationToolNames={confirmationToolNames}
+        addToolResult={addToolResult}
+        onSendMessage={handleSendMessage}
+        onStop={stop}
+        disabled={disabled}
+        emptyState={emptyState}
+        placeholder="Send a test message"
+        disabledPlaceholder="Create this agent to start chatting"
+        className="flex h-full flex-col"
+        messagesContainerClassName="bg-background/60 px-4 py-4 space-y-4"
+        composerClassName="border-t border-border/70 bg-background px-4 py-3"
+        showAvatars={false}
+      />
     </Card>
   );
 }
@@ -319,6 +180,9 @@ export function AgentConfigPanel() {
   const [agentBehavior, setAgentBehavior] = useState("");
   const [allowAllTools, setAllowAllTools] = useState(true);
   const [selectedToolNames, setSelectedToolNames] = useState<string[]>([]);
+  const [selectedHandoffAgentIds, setSelectedHandoffAgentIds] = useState<
+    string[]
+  >([]);
   const [systemPrompt, setSystemPrompt] = useState(
     defaultAgentConfig.systemPrompt
   );
@@ -350,6 +214,23 @@ export function AgentConfigPanel() {
     [tools]
   );
 
+  const availableHandoffAgents = useMemo(() => {
+    if (!agents || agents.length === 0) return [] as AgentProfile[];
+    return agents
+      .filter((agent) => agent.id !== editingAgentId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [agents, editingAgentId]);
+
+  const handoffNameMap = useMemo(() => {
+    const entries = agents.map((agent) => [agent.id, agent.name] as const);
+    return new Map(entries);
+  }, [agents]);
+
+  const selectedHandoffNames = useMemo(
+    () => selectedHandoffAgentIds.map((id) => handoffNameMap.get(id) ?? id),
+    [handoffNameMap, selectedHandoffAgentIds]
+  );
+
   const activeEditingAgent = useMemo(() => {
     if (isDraftNew || !editingAgentId) return null;
     if (activeAgent && activeAgent.id === editingAgentId) {
@@ -367,6 +248,7 @@ export function AgentConfigPanel() {
         setAgentBehavior("");
         setAllowAllTools(true);
         setSelectedToolNames([]);
+        setSelectedHandoffAgentIds([]);
         const fallbackConfig = defaultProfile?.config ?? defaultAgentConfig;
         setSystemPrompt(fallbackConfig.systemPrompt);
         setModelId(fallbackConfig.modelId);
@@ -384,6 +266,7 @@ export function AgentConfigPanel() {
         setAllowAllTools(false);
         setSelectedToolNames([...profile.toolNames]);
       }
+      setSelectedHandoffAgentIds([...(profile.handoffAgentIds ?? [])].sort());
       setSystemPrompt(profile.config.systemPrompt);
       setModelId(profile.config.modelId);
       setTemperature(clampTemperature(profile.config.temperature));
@@ -417,6 +300,15 @@ export function AgentConfigPanel() {
     }
   }, [agentActionError]);
 
+  useEffect(() => {
+    setSelectedHandoffAgentIds((prev) => {
+      if (prev.length === 0) return prev;
+      const validIds = new Set(availableHandoffAgents.map((agent) => agent.id));
+      const filtered = prev.filter((id) => validIds.has(id));
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [availableHandoffAgents]);
+
   const hasProfileChanges = useMemo(() => {
     if (isDraftNew) return true;
     if (!activeEditingAgent) return false;
@@ -429,14 +321,17 @@ export function AgentConfigPanel() {
     }
     const currentTools = activeEditingAgent.toolNames ?? [];
     if (activeEditingAgent.toolNames === null) return true;
-    return !arraysEqual(currentTools, selectedToolNames);
+    if (!arraysEqual(currentTools, selectedToolNames)) return true;
+    const currentHandoffs = activeEditingAgent.handoffAgentIds ?? [];
+    return !arraysEqual(currentHandoffs, selectedHandoffAgentIds);
   }, [
     activeEditingAgent,
     agentName,
     agentBehavior,
     allowAllTools,
     isDraftNew,
-    selectedToolNames
+    selectedToolNames,
+    selectedHandoffAgentIds
   ]);
 
   const hasConfigChanges = useMemo(() => {
@@ -536,6 +431,11 @@ export function AgentConfigPanel() {
       }
     }
 
+    const currentHandoffs = activeEditingAgent.handoffAgentIds ?? [];
+    if (!arraysEqual(currentHandoffs, selectedHandoffAgentIds)) {
+      update.handoffAgentIds = selectedHandoffAgentIds;
+    }
+
     try {
       await updateAgent(activeEditingAgent.id, update);
       setAgentSuccessMessage("Agent profile updated.");
@@ -602,6 +502,7 @@ export function AgentConfigPanel() {
       name: trimmedName,
       behavior: trimmedBehavior,
       toolNames: allowAllTools ? null : selectedToolNames,
+      handoffAgentIds: selectedHandoffAgentIds,
       config: {
         systemPrompt: systemPrompt.trim(),
         modelId: modelId.trim(),
@@ -896,6 +797,52 @@ export function AgentConfigPanel() {
                 </div>
               )}
 
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Allowed handoff agents</p>
+                <p className="text-xs text-muted-foreground">
+                  Choose agents this profile may delegate to. Leave empty to
+                  respond directly.
+                </p>
+                {availableHandoffAgents.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {agents.length <= 1
+                      ? "Create another agent to enable handoffs."
+                      : "No other agents available."}
+                  </p>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {availableHandoffAgents.map((agent) => (
+                      <label
+                        key={agent.id}
+                        className="flex gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedHandoffAgentIds.includes(agent.id)}
+                          onChange={() => {
+                            setAgentSuccessMessage(null);
+                            setSelectedHandoffAgentIds((prev) => {
+                              if (prev.includes(agent.id)) {
+                                return prev
+                                  .filter((id) => id !== agent.id)
+                                  .sort();
+                              }
+                              return [...prev, agent.id].sort();
+                            });
+                          }}
+                        />
+                        <div className="flex flex-col">
+                          <span>{agent.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {agent.behavior}
+                          </span>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {isDraftNew ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm">
@@ -930,10 +877,17 @@ export function AgentConfigPanel() {
                 </div>
               ) : (
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-xs text-muted-foreground">
-                    {allowAllTools
-                      ? "Agent can access all registered tools."
-                      : `Selected tools: ${selectedToolNames.join(", ") || "None"}`}
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <p>
+                      {allowAllTools
+                        ? "Tools: agent can access all registered tools."
+                        : `Tools: ${selectedToolNames.join(", ") || "None"}`}
+                    </p>
+                    <p>
+                      {selectedHandoffAgentIds.length === 0
+                        ? "Handoffs: responds directly (no handoffs configured)."
+                        : `Handoffs: ${selectedHandoffNames.join(", ")}`}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button

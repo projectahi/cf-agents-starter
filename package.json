@@ -6,6 +6,7 @@
   "private": true,
   "scripts": {
     "start": "vite dev",
+    "worker:dev": "wrangler dev --remote",
     "deploy": "vite build && wrangler deploy",
     "test": "vitest",
     "types": "wrangler types env.d.ts --include-runtime false",

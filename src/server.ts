@@ -6,6 +6,7 @@ import { AIChatAgent } from "agents/ai-chat-agent";
 import {
   generateId,
   streamText,
+  generateText,
   type StreamTextOnFinishCallback,
   stepCountIs,
   createUIMessageStream,
@@ -13,18 +14,15 @@ import {
   createUIMessageStreamResponse,
   type ToolSet
 } from "ai";
+import type { UIMessage } from "@ai-sdk/react";
 import { openai } from "@ai-sdk/openai";
 import { processToolCalls, cleanupMessages } from "./utils";
 import { ZodError } from "zod";
 import { z } from "zod/v3";
 import {
-  getToolSet,
-  getExecutionHandlers,
-  listTools,
-  registerOpenApiSpec,
-  updateToolGuidance,
-  getToolPrompt,
-  deleteTool
+  createToolRegistry,
+  type RegisterOpenApiSpecResult,
+  type ToolListItem
 } from "./tool-registry";
 import { OpenApiToolError } from "./lib/openapi-tools";
 import {
@@ -40,6 +38,7 @@ import {
   type AgentProfileInput,
   type AgentProfileUpdateInput
 } from "./agent-config";
+import type { ChatMessageMetadata, RespondingAgentMetadata } from "./shared";
 // import { env } from "cloudflare:workers";
 
 const API_PREFIX = "/api";
@@ -81,6 +80,9 @@ type AgentProfileRow = {
 
 export class Chat extends AIChatAgent<Env> {
   private agentRegistryInitialized = false;
+  private toolRegistry = createToolRegistry(() => new Date());
+  private toolRegistryInitialized = false;
+  private pendingRespondingAgent: RespondingAgentMetadata | null = null;
 
   private ensureAgentRegistry() {
     if (this.agentRegistryInitialized) {
@@ -95,6 +97,13 @@ export class Chat extends AIChatAgent<Env> {
     this.sql`create table if not exists cf_agent_active_profile (
       pk integer primary key check (pk = 1),
       agent_id text not null
+    )`;
+
+    this.sql`create table if not exists cf_agent_profile_handoffs (
+      profile_id text not null,
+      handoff_id text not null,
+      created_at text not null,
+      primary key (profile_id, handoff_id)
     )`;
 
     const countRows = this.sql`select count(*) as count from cf_agent_profiles`;
@@ -123,6 +132,331 @@ export class Chat extends AIChatAgent<Env> {
     this.agentRegistryInitialized = true;
   }
 
+  private ensureToolRegistry() {
+    if (this.toolRegistryInitialized) {
+      return;
+    }
+
+    this.ensureAgentRegistry();
+
+    this.sql`create table if not exists cf_agent_tool_specs (
+      spec_name text primary key,
+      spec text not null,
+      created_at text not null,
+      updated_at text not null
+    )`;
+
+    this.sql`create table if not exists cf_agent_tool_guidance (
+      tool_name text primary key,
+      description text not null,
+      updated_at text not null
+    )`;
+
+    this.sql`create table if not exists cf_agent_tool_deletions (
+      tool_name text primary key,
+      deleted_at text not null
+    )`;
+
+    const specRows = this
+      .sql`select spec_name, spec, created_at, updated_at from cf_agent_tool_specs order by datetime(created_at) asc`;
+
+    if (Array.isArray(specRows)) {
+      for (const row of specRows) {
+        const specName = row?.spec_name as string | undefined;
+        const spec = row?.spec as string | undefined;
+        if (!specName || !spec) continue;
+        const updatedAt =
+          (row?.updated_at as string | undefined) ??
+          (row?.created_at as string | undefined);
+        try {
+          this.toolRegistry.registerOpenApiSpec(
+            { name: specName, spec },
+            { timestamp: updatedAt }
+          );
+        } catch (error) {
+          console.error(
+            `Failed to hydrate tool spec ${specName} from storage`,
+            error
+          );
+        }
+      }
+    }
+
+    const guidanceRows = this
+      .sql`select tool_name, description, updated_at from cf_agent_tool_guidance`;
+
+    if (Array.isArray(guidanceRows)) {
+      for (const row of guidanceRows) {
+        const toolName = row?.tool_name as string | undefined;
+        const description = row?.description as string | undefined;
+        const updatedAt = row?.updated_at as string | undefined;
+        if (!toolName || !description || !updatedAt) continue;
+        this.toolRegistry.applyGuidanceOverride(
+          toolName,
+          description,
+          updatedAt
+        );
+      }
+    }
+
+    const deletedRows = this
+      .sql`select tool_name, deleted_at from cf_agent_tool_deletions`;
+
+    if (Array.isArray(deletedRows)) {
+      for (const row of deletedRows) {
+        const toolName = row?.tool_name as string | undefined;
+        const deletedAt = row?.deleted_at as string | undefined;
+        if (!toolName || !deletedAt) continue;
+        this.toolRegistry.applyDeletedTool(toolName, deletedAt);
+      }
+    }
+
+    this.toolRegistryInitialized = true;
+  }
+
+  private listHandoffAgentIds(profileId: string): string[] {
+    this.ensureAgentRegistry();
+    const rows = this
+      .sql`select handoff_id from cf_agent_profile_handoffs where profile_id = ${profileId} order by handoff_id asc`;
+    if (!Array.isArray(rows)) {
+      return [];
+    }
+    const ids: string[] = [];
+    for (const row of rows) {
+      const value = row?.handoff_id as string | undefined;
+      if (typeof value === "string" && value.length > 0) {
+        ids.push(value);
+      }
+    }
+    return ids;
+  }
+
+  private hydrateProfileHandoffs(profile: AgentProfile): AgentProfile {
+    const storedIds = this.listHandoffAgentIds(profile.id);
+    if (storedIds.length === profile.handoffAgentIds.length) {
+      const sameOrder = storedIds.every(
+        (id, index) => id === profile.handoffAgentIds[index]
+      );
+      if (sameOrder) {
+        return profile;
+      }
+    }
+    return {
+      ...profile,
+      handoffAgentIds: storedIds
+    } satisfies AgentProfile;
+  }
+
+  private replaceProfileHandoffs(profileId: string, handoffIds: string[]) {
+    this.ensureAgentRegistry();
+    this
+      .sql`delete from cf_agent_profile_handoffs where profile_id = ${profileId}`;
+    if (handoffIds.length === 0) {
+      return;
+    }
+    const now = new Date().toISOString();
+    for (const handoffId of handoffIds) {
+      this
+        .sql`insert or replace into cf_agent_profile_handoffs (profile_id, handoff_id, created_at) values (${profileId}, ${handoffId}, ${now})`;
+    }
+  }
+
+  private normalizeHandoffAgentIds(
+    profileId: string,
+    handoffIds: string[] | null | undefined
+  ): string[] {
+    if (!handoffIds || handoffIds.length === 0) {
+      return [];
+    }
+
+    const cleaned = handoffIds
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const id of cleaned) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      unique.push(id);
+    }
+
+    if (unique.includes(profileId)) {
+      throw new Error("An agent cannot hand off to itself");
+    }
+
+    for (const id of unique) {
+      const rows = this
+        .sql`select id from cf_agent_profiles where id = ${id} limit 1`;
+      if (!Array.isArray(rows) || rows.length === 0) {
+        throw new Error(`Handoff agent ${id} not found`);
+      }
+    }
+
+    unique.sort();
+    return unique;
+  }
+
+  private async resolveTargetProfile({
+    activeProfile,
+    cleanedMessages
+  }: {
+    activeProfile: AgentProfile;
+    cleanedMessages: UIMessage<ChatMessageMetadata>[];
+  }): Promise<{
+    profile: AgentProfile;
+    source: "active" | "handoff";
+    reason?: string;
+  }> {
+    const handoffProfiles = activeProfile.handoffAgentIds
+      .map((id) => this.getAgentProfile(id))
+      .filter((profile): profile is AgentProfile => profile !== null);
+
+    if (handoffProfiles.length === 0) {
+      return { profile: activeProfile, source: "active" };
+    }
+
+    try {
+      const decision = await this.selectHandoffAgent({
+        activeProfile,
+        handoffProfiles,
+        messages: cleanedMessages
+      });
+      if (decision) {
+        return {
+          profile: decision.profile,
+          source: "handoff",
+          reason: decision.reason
+        };
+      }
+    } catch (error) {
+      console.error("Failed to determine handoff agent", error);
+    }
+
+    return { profile: activeProfile, source: "active" };
+  }
+
+  private async selectHandoffAgent({
+    activeProfile,
+    handoffProfiles,
+    messages
+  }: {
+    activeProfile: AgentProfile;
+    handoffProfiles: AgentProfile[];
+    messages: UIMessage<ChatMessageMetadata>[];
+  }): Promise<{ profile: AgentProfile; reason?: string } | null> {
+    const userMessages = messages.filter((message) => message.role === "user");
+    if (userMessages.length === 0) {
+      return null;
+    }
+
+    const roster = handoffProfiles
+      .map((profile) => {
+        const { effectiveToolNames } = this.getToolsForProfile(profile);
+        const toolSummary =
+          effectiveToolNames.length > 0
+            ? effectiveToolNames.join(", ")
+            : "No tool access";
+        return `- ${profile.name} (id: ${profile.id}): ${profile.behavior} Tools: ${toolSummary}`;
+      })
+      .join("\n");
+
+    const systemPrompt = `${activeProfile.config.systemPrompt.trim()}
+
+You are an orchestration agent responsible for routing user messages to the most capable specialist assistant. Review the conversation so far and select the best agent from the list below. If none apply, choose null.
+
+Respond ONLY with strict JSON of the form {"agentId": "<id or null>", "reason": "<short explanation>"}.
+
+Specialist agents:\n${roster}`;
+
+    try {
+      const { text } = await generateText({
+        model: openai(activeProfile.config.modelId),
+        system: systemPrompt,
+        messages: convertToModelMessages(messages),
+        temperature: Math.min(
+          0.4,
+          Math.max(0.1, activeProfile.config.temperature)
+        ),
+        stopWhen: stepCountIs(
+          Math.max(1, Math.min(4, activeProfile.config.maxSteps))
+        )
+      });
+
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return null;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch (error) {
+        console.warn("Failed to parse triage JSON", error, text);
+        return null;
+      }
+      if (!parsed || typeof parsed !== "object") {
+        return null;
+      }
+      const agentId = (parsed as { agentId?: unknown }).agentId;
+      const reasonRaw = (parsed as { reason?: unknown }).reason;
+      const reason = typeof reasonRaw === "string" ? reasonRaw : undefined;
+
+      if (agentId === null || agentId === "null") {
+        return null;
+      }
+
+      if (typeof agentId !== "string" || agentId.length === 0) {
+        return null;
+      }
+
+      const selected = handoffProfiles.find(
+        (profile) => profile.id === agentId
+      );
+      if (!selected) {
+        return null;
+      }
+
+      return { profile: selected, reason };
+    } catch (error) {
+      console.error("Failed to execute triage model", error);
+      return null;
+    }
+  }
+
+  private buildSystemPrompt(
+    profile: AgentProfile,
+    toolPrompt: string,
+    effectiveToolNames: string[],
+    options: { reason?: string; parentName?: string } = {}
+  ) {
+    const scheduleGuidance = getSchedulePrompt({ date: new Date() });
+    const hasScheduleTool = effectiveToolNames.includes("scheduleTask");
+    const scheduleInstruction = hasScheduleTool
+      ? "If the user asks to schedule a task, use the schedule tool to schedule the task."
+      : "If the user asks to schedule a task, let them know scheduling is currently unavailable.";
+    const selectionNote = options.reason
+      ? `\n\nYou were selected by ${options.parentName ?? "the orchestrator"} because: ${options.reason}`
+      : "";
+    const identityInstruction = options.parentName
+      ? `\nIdentify yourself as "${profile.name}" in your first sentence so the user knows which specialist is responding.`
+      : "";
+    const toolsSection = toolPrompt
+      ? `\n\nTOOLS AVAILABLE (read carefully before responding):\n${toolPrompt}`
+      : "";
+
+    return `${profile.config.systemPrompt.trim()}
+
+${scheduleGuidance}
+
+${scheduleInstruction}${selectionNote}${identityInstruction}${toolsSection}`;
+  }
+
+  private reloadToolRegistryFromStorage() {
+    this.toolRegistry = createToolRegistry(() => new Date());
+    this.toolRegistryInitialized = false;
+    this.ensureToolRegistry();
+  }
+
   private parseAgentProfileRow(row: unknown): AgentProfile | null {
     if (!row || typeof row !== "object") {
       return null;
@@ -135,7 +469,8 @@ export class Chat extends AIChatAgent<Env> {
 
     try {
       const parsed = JSON.parse(profile) as unknown;
-      return agentProfileValidators.full.parse(parsed);
+      const validated = agentProfileValidators.full.parse(parsed);
+      return this.hydrateProfileHandoffs(validated);
     } catch (error) {
       console.error("Failed to parse agent profile", error);
       return null;
@@ -168,10 +503,13 @@ export class Chat extends AIChatAgent<Env> {
     this.ensureAgentRegistry();
     this
       .sql`insert or replace into cf_agent_profiles (id, profile) values (${profile.id}, ${JSON.stringify(profile)})`;
+    this.replaceProfileHandoffs(profile.id, profile.handoffAgentIds);
   }
 
   private deleteAgentProfile(id: string) {
     this.ensureAgentRegistry();
+    this.sql`delete from cf_agent_profile_handoffs where profile_id = ${id}`;
+    this.sql`delete from cf_agent_profile_handoffs where handoff_id = ${id}`;
     this.sql`delete from cf_agent_profiles where id = ${id}`;
   }
 
@@ -215,7 +553,8 @@ export class Chat extends AIChatAgent<Env> {
   }
 
   private getToolsForProfile(profile: AgentProfile) {
-    const registryTools = getToolSet();
+    this.ensureToolRegistry();
+    const registryTools = this.toolRegistry.getToolSet();
     const mcpTools = this.mcp.getAITools();
     const combinedTools: Record<string, ToolSet[string]> = {
       ...registryTools,
@@ -242,7 +581,7 @@ export class Chat extends AIChatAgent<Env> {
     return {
       tools: selectedTools as ToolSet,
       effectiveToolNames,
-      toolPrompt: getToolPrompt(
+      toolPrompt: this.toolRegistry.getToolPrompt(
         allowedNames ? Array.from(allowedNames) : undefined
       )
     };
@@ -258,12 +597,220 @@ export class Chat extends AIChatAgent<Env> {
     };
   }
 
+  private registerOpenApiSpecPersistent(args: { name?: string; spec: string }) {
+    this.ensureToolRegistry();
+    const specName = (args.name ?? "openapi-spec").trim() || "openapi-spec";
+    const now = new Date().toISOString();
+
+    let createdAt = now;
+    const existing = this
+      .sql`select created_at from cf_agent_tool_specs where spec_name = ${specName} limit 1`;
+    if (Array.isArray(existing) && existing.length > 0) {
+      createdAt = (existing[0]?.created_at as string | undefined) ?? now;
+    }
+
+    let result: RegisterOpenApiSpecResult;
+    try {
+      result = this.toolRegistry.registerOpenApiSpec(
+        { name: specName, spec: args.spec },
+        { timestamp: now }
+      );
+    } catch (error) {
+      this.reloadToolRegistryFromStorage();
+      throw error;
+    }
+
+    try {
+      this
+        .sql`insert or replace into cf_agent_tool_specs (spec_name, spec, created_at, updated_at) values (${specName}, ${args.spec}, ${createdAt}, ${now})`;
+      for (const tool of result.tools) {
+        this.toolRegistry.unmarkToolDeletion(tool.name);
+        this
+          .sql`delete from cf_agent_tool_deletions where tool_name = ${tool.name}`;
+      }
+    } catch (error) {
+      console.error("Failed to persist tool specification", error);
+      this.reloadToolRegistryFromStorage();
+      throw error;
+    }
+
+    return result;
+  }
+
+  private updateToolGuidancePersistent(name: string, description: string) {
+    this.ensureToolRegistry();
+    const updated: ToolListItem = this.toolRegistry.setGuidanceOverride(
+      name,
+      description
+    );
+
+    try {
+      this
+        .sql`insert or replace into cf_agent_tool_guidance (tool_name, description, updated_at) values (${name}, ${description}, ${updated.updatedAt})`;
+    } catch (error) {
+      console.error("Failed to persist tool guidance", error);
+      this.reloadToolRegistryFromStorage();
+      throw error;
+    }
+
+    return updated;
+  }
+
+  private deleteToolPersistent(name: string) {
+    this.ensureToolRegistry();
+    const deletedAt = this.toolRegistry.markToolDeleted(name);
+
+    try {
+      this
+        .sql`insert or replace into cf_agent_tool_deletions (tool_name, deleted_at) values (${name}, ${deletedAt})`;
+      this.sql`delete from cf_agent_tool_guidance where tool_name = ${name}`;
+    } catch (error) {
+      console.error("Failed to persist tool deletion", error);
+      this.reloadToolRegistryFromStorage();
+      throw error;
+    }
+  }
+
+  private async handleToolsRequest(
+    request: Request,
+    segments: string[]
+  ): Promise<Response> {
+    this.ensureToolRegistry();
+
+    if (segments.length === 0) {
+      if (request.method === "GET") {
+        return this.jsonResponse({
+          tools: this.toolRegistry.listTools(),
+          prompt: this.toolRegistry.getToolPrompt()
+        });
+      }
+
+      if (request.method === "POST") {
+        const bodySchema = z.object({
+          name: z.string().min(1).optional(),
+          spec: z.string().min(1)
+        });
+
+        let parsedBody: z.infer<typeof bodySchema>;
+        try {
+          parsedBody = bodySchema.parse(await request.json());
+        } catch (error) {
+          return this.jsonResponse(
+            {
+              error: "Invalid request body",
+              details:
+                error instanceof ZodError ? error.flatten() : String(error)
+            },
+            { status: 400 }
+          );
+        }
+
+        try {
+          const result = this.registerOpenApiSpecPersistent(parsedBody);
+          return this.jsonResponse(result, { status: 201 });
+        } catch (error) {
+          console.error("Error registering OpenAPI spec", error);
+          const status = error instanceof OpenApiToolError ? 400 : 500;
+          return this.jsonResponse(
+            {
+              error: "Failed to register tool specification",
+              details: String(error)
+            },
+            { status }
+          );
+        }
+      }
+
+      return new Response("Method Not Allowed", {
+        status: 405,
+        headers: {
+          Allow: "GET, POST"
+        }
+      });
+    }
+
+    const [toolName] = segments;
+    const decodedName = decodeURIComponent(toolName);
+
+    if (request.method === "PATCH") {
+      const bodySchema = z.object({
+        description: z.string().min(1)
+      });
+
+      let parsedBody: z.infer<typeof bodySchema>;
+      try {
+        parsedBody = bodySchema.parse(await request.json());
+      } catch (error) {
+        return this.jsonResponse(
+          {
+            error: "Invalid request body",
+            details: error instanceof ZodError ? error.flatten() : String(error)
+          },
+          { status: 400 }
+        );
+      }
+
+      try {
+        const tool = this.updateToolGuidancePersistent(
+          decodedName,
+          parsedBody.description
+        );
+        return this.jsonResponse({
+          tool,
+          prompt: this.toolRegistry.getToolPrompt()
+        });
+      } catch (error) {
+        console.error("Error updating tool guidance", error);
+        const status = error instanceof OpenApiToolError ? 404 : 500;
+        return this.jsonResponse(
+          {
+            error: "Failed to update tool",
+            details: String(error)
+          },
+          { status }
+        );
+      }
+    }
+
+    if (request.method === "DELETE") {
+      try {
+        this.deleteToolPersistent(decodedName);
+        return this.jsonResponse({
+          prompt: this.toolRegistry.getToolPrompt()
+        });
+      } catch (error) {
+        console.error("Error deleting tool", error);
+        const status = error instanceof OpenApiToolError ? 404 : 500;
+        return this.jsonResponse(
+          {
+            error: "Failed to delete tool",
+            details: String(error)
+          },
+          { status }
+        );
+      }
+    }
+
+    return new Response("Method Not Allowed", {
+      status: 405,
+      headers: {
+        Allow: "PATCH, DELETE"
+      }
+    });
+  }
+
   private createAgentProfileEntry(input: AgentProfileInput): AgentProfile {
     this.ensureAgentRegistry();
     const parsedInput = agentProfileValidators.create.parse(input);
+    const id = crypto.randomUUID();
+    const normalizedHandoffs = this.normalizeHandoffAgentIds(
+      id,
+      parsedInput.handoffAgentIds ?? []
+    );
     const profile = createAgentProfile({
       ...parsedInput,
-      id: crypto.randomUUID()
+      id,
+      handoffAgentIds: normalizedHandoffs
     });
     this.saveAgentProfile(profile);
     return profile;
@@ -279,7 +826,17 @@ export class Chat extends AIChatAgent<Env> {
     if (!existing) {
       throw new Error(`Agent ${id} not found`);
     }
-    const merged = mergeAgentProfile(existing, parsedUpdate);
+    const normalizedUpdate =
+      parsedUpdate.handoffAgentIds !== undefined
+        ? {
+            ...parsedUpdate,
+            handoffAgentIds: this.normalizeHandoffAgentIds(
+              id,
+              parsedUpdate.handoffAgentIds ?? []
+            )
+          }
+        : parsedUpdate;
+    const merged = mergeAgentProfile(existing, normalizedUpdate);
     this.saveAgentProfile(merged);
     return merged;
   }
@@ -289,6 +846,28 @@ export class Chat extends AIChatAgent<Env> {
     const existing = this.getAgentProfile(id);
     if (!existing) {
       return null;
+    }
+
+    const referencingRows = this
+      .sql`select profile_id from cf_agent_profile_handoffs where handoff_id = ${id}`;
+    if (Array.isArray(referencingRows)) {
+      for (const row of referencingRows) {
+        const profileId = row?.profile_id as string | undefined;
+        if (!profileId) continue;
+        if (profileId === id) continue;
+        const profile = this.getAgentProfile(profileId);
+        if (!profile) continue;
+        const filtered = profile.handoffAgentIds.filter(
+          (handoffId) => handoffId !== id
+        );
+        if (filtered.length === profile.handoffAgentIds.length) {
+          continue;
+        }
+        const updated = mergeAgentProfile(profile, {
+          handoffAgentIds: filtered
+        });
+        this.saveAgentProfile(updated);
+      }
     }
 
     const activeId = this.getActiveAgentId();
@@ -362,6 +941,10 @@ export class Chat extends AIChatAgent<Env> {
 
     if (head === "agents") {
       return this.handleAgentsRequest(request, rest);
+    }
+
+    if (head === "tools") {
+      return this.handleToolsRequest(request, rest);
     }
 
     return new Response("Not Found", { status: 404 });
@@ -495,7 +1078,18 @@ export class Chat extends AIChatAgent<Env> {
         }
 
         const { setActive, ...agentInput } = createInput;
-        const profile = this.createAgentProfileEntry(agentInput);
+        let profile: AgentProfile;
+        try {
+          profile = this.createAgentProfileEntry(agentInput);
+        } catch (error) {
+          return this.jsonResponse(
+            {
+              error: "Failed to create agent",
+              details: String(error)
+            },
+            { status: 400 }
+          );
+        }
         if (setActive) {
           this.setActiveAgentProfile(profile.id);
         }
@@ -584,12 +1178,15 @@ export class Chat extends AIChatAgent<Env> {
             activeAgentToolPrompt: activePayload.toolPrompt
           });
         } catch (error) {
+          const message = String(error);
+          const status = message.includes("not found") ? 404 : 400;
           return this.jsonResponse(
             {
-              error: "Agent not found",
-              details: String(error)
+              error:
+                status === 404 ? "Agent not found" : "Invalid agent update",
+              details: message
             },
-            { status: 404 }
+            { status }
           );
         }
       }
@@ -664,18 +1261,46 @@ export class Chat extends AIChatAgent<Env> {
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
         // Clean up incomplete tool calls to prevent API errors
-        const cleanedMessages = cleanupMessages(this.messages);
+        const cleanedMessages = cleanupMessages(
+          this.messages
+        ) as UIMessage<ChatMessageMetadata>[];
 
-        // Process any pending tool calls from previous messages
-        // This handles human-in-the-loop confirmations for tools
         const activeProfile = this.getActiveAgentProfile();
+        const {
+          profile: targetProfile,
+          source,
+          reason
+        } = await this.resolveTargetProfile({
+          activeProfile,
+          cleanedMessages
+        });
+
         const {
           tools: selectedTools,
           effectiveToolNames,
           toolPrompt
-        } = this.getToolsForProfile(activeProfile);
+        } = this.getToolsForProfile(targetProfile);
 
-        const executionHandlers = getExecutionHandlers();
+        const respondingAgentMetadata: RespondingAgentMetadata = {
+          id: targetProfile.id,
+          name: targetProfile.name,
+          source,
+          orchestratorId: activeProfile.id,
+          orchestratorName: activeProfile.name,
+          reason: reason ?? null
+        };
+
+        this.pendingRespondingAgent = respondingAgentMetadata;
+
+        writer.write({
+          type: "message-metadata",
+          messageMetadata: {
+            respondingAgent: respondingAgentMetadata
+          }
+        });
+
+        this.ensureToolRegistry();
+        const executionHandlers = this.toolRegistry.getExecutionHandlers();
         const allowedExecutionNames = new Set(effectiveToolNames);
         const selectedExecutions = Object.fromEntries(
           Object.entries(executionHandlers).filter(([name]) =>
@@ -690,36 +1315,25 @@ export class Chat extends AIChatAgent<Env> {
           executions: selectedExecutions
         });
 
-        const toolsSection = toolPrompt
-          ? `\n\nTOOLS AVAILABLE (read carefully before responding):\n${toolPrompt}`
-          : "";
+        const systemPrompt = this.buildSystemPrompt(
+          targetProfile,
+          toolPrompt,
+          effectiveToolNames,
+          source === "handoff"
+            ? { reason, parentName: activeProfile.name }
+            : undefined
+        );
 
-        const agentConfig = activeProfile.config;
-        const model = openai(agentConfig.modelId);
-
-        const scheduleGuidance = getSchedulePrompt({ date: new Date() });
-        const hasScheduleTool = effectiveToolNames.includes("scheduleTask");
-        const scheduleInstruction = hasScheduleTool
-          ? "If the user asks to schedule a task, use the schedule tool to schedule the task."
-          : "If the user asks to schedule a task, let them know scheduling is currently unavailable.";
-        const systemPrompt = `${agentConfig.systemPrompt.trim()}
-
-${scheduleGuidance}
-
-${scheduleInstruction}${toolsSection}`;
+        const model = openai(targetProfile.config.modelId);
 
         const result = streamText({
           system: systemPrompt,
           messages: convertToModelMessages(processedMessages),
           model,
-          temperature: agentConfig.temperature,
+          temperature: targetProfile.config.temperature,
           tools: selectedTools,
-          // Type boundary: streamText expects specific tool types, but base class uses ToolSet
-          // This is safe because our tools satisfy ToolSet interface (verified by 'satisfies' in tools.ts)
-          onFinish: onFinish as unknown as StreamTextOnFinishCallback<
-            typeof selectedTools
-          >,
-          stopWhen: stepCountIs(agentConfig.maxSteps)
+          onFinish,
+          stopWhen: stepCountIs(targetProfile.config.maxSteps)
         });
 
         writer.merge(result.toUIMessageStream());
@@ -727,6 +1341,83 @@ ${scheduleInstruction}${toolsSection}`;
     });
 
     return createUIMessageStreamResponse({ stream });
+  }
+
+  override async saveMessages(messages: UIMessage[]): Promise<void> {
+    const metadata = this.pendingRespondingAgent;
+    console.log("[saveMessages] metadata present?", metadata);
+
+    if (!metadata) {
+      await super.saveMessages(messages);
+      return;
+    }
+
+    console.log("[saveMessages] pending responding agent", metadata);
+
+    let lastAssistantIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === "assistant") {
+        lastAssistantIndex = index;
+        break;
+      }
+    }
+
+    if (lastAssistantIndex === -1) {
+      await super.saveMessages(messages);
+      return;
+    }
+
+    const targetMessage = messages[
+      lastAssistantIndex
+    ] as UIMessage<ChatMessageMetadata>;
+    console.log("[saveMessages] incoming assistant message", targetMessage);
+    const parts = targetMessage.parts ?? [];
+    const hasAssistantContent = parts.some((part) => {
+      if (part.type === "text") {
+        return part.text.trim().length > 0;
+      }
+      return part.type === "reasoning";
+    });
+
+    if (!hasAssistantContent) {
+      await super.saveMessages(messages);
+      return;
+    }
+
+    const existingMetadata = targetMessage.metadata?.respondingAgent;
+    if (
+      existingMetadata &&
+      existingMetadata.id === metadata.id &&
+      existingMetadata.source === metadata.source
+    ) {
+      this.pendingRespondingAgent = null;
+      await super.saveMessages(messages);
+      return;
+    }
+
+    const augmented = messages.map((message, index) => {
+      if (index !== lastAssistantIndex) {
+        return message;
+      }
+      const currentMetadata =
+        (message.metadata as ChatMessageMetadata | undefined) ?? {};
+      const updatedMessage: UIMessage<ChatMessageMetadata> = {
+        ...message,
+        metadata: {
+          ...currentMetadata,
+          respondingAgent: metadata
+        }
+      };
+      return updatedMessage;
+    });
+
+    console.log(
+      "[saveMessages] augmented assistant message",
+      augmented[lastAssistantIndex]
+    );
+
+    this.pendingRespondingAgent = null;
+    await super.saveMessages(augmented as UIMessage[]);
   }
   async executeTask(description: string, _task: Schedule<string>) {
     await this.saveMessages([
@@ -778,131 +1469,15 @@ export default {
       );
     }
 
-    if (url.pathname.startsWith("/api/tools/")) {
-      const toolName = decodeURIComponent(
-        url.pathname.replace("/api/tools/", "")
+    if (
+      url.pathname === "/api/tools" ||
+      url.pathname.startsWith("/api/tools/")
+    ) {
+      return forwardToAgentDurableObject(
+        env,
+        request,
+        toInternalAgentPath(url.pathname)
       );
-
-      if (request.method === "PATCH") {
-        const bodySchema = z.object({
-          description: z.string().min(1)
-        });
-
-        let parsedBody: z.infer<typeof bodySchema>;
-        try {
-          const json = await request.json();
-          parsedBody = bodySchema.parse(json);
-        } catch (error) {
-          return Response.json(
-            {
-              error: "Invalid request body",
-              details:
-                error instanceof ZodError ? error.flatten() : String(error)
-            },
-            { status: 400 }
-          );
-        }
-
-        try {
-          const tool = updateToolGuidance({
-            name: toolName,
-            description: parsedBody.description
-          });
-          return Response.json({
-            tool,
-            prompt: getToolPrompt()
-          });
-        } catch (error) {
-          console.error("Error updating tool guidance", error);
-          const status = error instanceof OpenApiToolError ? 404 : 500;
-          return Response.json(
-            {
-              error: "Failed to update tool",
-              details: String(error)
-            },
-            { status }
-          );
-        }
-      }
-
-      if (request.method === "DELETE") {
-        try {
-          deleteTool(toolName);
-          return Response.json({
-            prompt: getToolPrompt()
-          });
-        } catch (error) {
-          console.error("Error deleting tool", error);
-          const status = error instanceof OpenApiToolError ? 404 : 500;
-          return Response.json(
-            {
-              error: "Failed to delete tool",
-              details: String(error)
-            },
-            { status }
-          );
-        }
-      }
-
-      return new Response("Method Not Allowed", {
-        status: 405,
-        headers: {
-          Allow: "PATCH, DELETE"
-        }
-      });
-    }
-
-    if (url.pathname === "/api/tools") {
-      if (request.method === "GET") {
-        return Response.json({
-          tools: listTools(),
-          prompt: getToolPrompt()
-        });
-      }
-
-      if (request.method === "POST") {
-        const bodySchema = z.object({
-          name: z.string().min(1).optional(),
-          spec: z.string().min(1)
-        });
-
-        let parsedBody: z.infer<typeof bodySchema>;
-        try {
-          const json = await request.json();
-          parsedBody = bodySchema.parse(json);
-        } catch (error) {
-          return Response.json(
-            {
-              error: "Invalid request body",
-              details:
-                error instanceof ZodError ? error.flatten() : String(error)
-            },
-            { status: 400 }
-          );
-        }
-
-        try {
-          const result = await registerOpenApiSpec(parsedBody);
-          return Response.json(result, { status: 201 });
-        } catch (error) {
-          console.error("Error registering OpenAPI spec", error);
-          const status = error instanceof OpenApiToolError ? 400 : 500;
-          return Response.json(
-            {
-              error: "Failed to register tool specification",
-              details: String(error)
-            },
-            { status }
-          );
-        }
-      }
-
-      return new Response("Method Not Allowed", {
-        status: 405,
-        headers: {
-          Allow: "GET, POST"
-        }
-      });
     }
 
     if (!process.env.OPENAI_API_KEY) {
