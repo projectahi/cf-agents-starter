@@ -23,7 +23,8 @@ import {
   type CreateAgentInput,
   type UpdateAgentInput
 } from "@/hooks/useAgentConfig";
-import { useTools } from "@/hooks/useTools";
+import { useTools, type ToolListItem } from "@/hooks/useTools";
+import type { McpConnector } from "@/hooks/useMcpConnectors";
 import type { ChatMessageMetadata } from "@/shared";
 
 function clampTemperature(value: number) {
@@ -144,7 +145,15 @@ function AgentChatPreview({
   );
 }
 
-export function AgentConfigPanel() {
+interface AgentConfigPanelProps {
+  mcpConnectors?: McpConnector[];
+  isLoadingMcpConnectors?: boolean;
+}
+
+export function AgentConfigPanel({
+  mcpConnectors = [],
+  isLoadingMcpConnectors = false
+}: AgentConfigPanelProps = {}) {
   const {
     agents,
     activeAgent,
@@ -209,10 +218,79 @@ export function AgentConfigPanel() {
   const maxStepsInputId = useId();
   const systemPromptId = useId();
 
-  const toolNames = useMemo(
+  const allToolNames = useMemo(
     () => tools.map((tool) => tool.name).sort(),
     [tools]
   );
+
+  const connectorLookup = useMemo(() => {
+    return new Map<string, McpConnector>(
+      mcpConnectors.map((connector) => [connector.id, connector])
+    );
+  }, [mcpConnectors]);
+
+  const toolGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      { key: string; label: string; tools: ToolListItem[] }
+    >();
+
+    const sortedTools = [...tools].sort((a, b) => a.name.localeCompare(b.name));
+
+    const getGroupForTool = (tool: ToolListItem) => {
+      const origin = tool.origin;
+      if (origin?.type === "mcp") {
+        const serverId = String(origin.serverId);
+        const connector = connectorLookup.get(serverId);
+        const displayNameValue = connector?.metadata?.displayName;
+        const displayName =
+          typeof displayNameValue === "string" ? displayNameValue : serverId;
+        const statusBase =
+          typeof connector?.status === "string" ? connector.status : null;
+        const status =
+          statusBase && statusBase.length > 0
+            ? ` (${statusBase.replace(/_/g, " ")})`
+            : "";
+        return {
+          key: `mcp:${serverId}`,
+          label: `MCP • ${displayName}${status}`
+        };
+      }
+      if (origin?.type === "openapi") {
+        const specName = origin.specName ?? "OpenAPI spec";
+        return {
+          key: `openapi:${specName}`,
+          label: `OpenAPI • ${specName}`
+        };
+      }
+      if (origin?.type === "manual" || tool.source === "builtin") {
+        return {
+          key: "builtin",
+          label: "Built-in tools"
+        };
+      }
+      return {
+        key: "dynamic",
+        label: "Dynamic tools"
+      };
+    };
+
+    for (const tool of sortedTools) {
+      const groupInfo = getGroupForTool(tool);
+      if (!groups.has(groupInfo.key)) {
+        groups.set(groupInfo.key, {
+          key: groupInfo.key,
+          label: groupInfo.label,
+          tools: []
+        });
+      }
+      groups.get(groupInfo.key)?.tools.push(tool);
+    }
+
+    return Array.from(groups.values()).sort((a, b) =>
+      a.label.localeCompare(b.label)
+    );
+  }, [connectorLookup, tools]);
 
   const availableHandoffAgents = useMemo(() => {
     if (!agents || agents.length === 0) return [] as AgentProfile[];
@@ -390,7 +468,7 @@ export function AgentConfigPanel() {
           ? activeEditingAgent.toolNames
           : selectedToolNames.length > 0
             ? selectedToolNames
-            : toolNames;
+            : allToolNames;
       setSelectedToolNames([...fallback]);
     }
   };
@@ -757,43 +835,73 @@ export function AgentConfigPanel() {
               </div>
 
               {!allowAllTools && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Select tools</p>
-                  {isToolsLoading && (
-                    <p className="text-xs text-muted-foreground">
-                      Loading tools…
-                    </p>
-                  )}
-                  {toolsError && (
-                    <p className="text-xs text-destructive">{toolsError}</p>
-                  )}
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {toolNames.map((toolName) => (
-                      <label
-                        key={toolName}
-                        className="flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedToolNames.includes(toolName)}
-                          onChange={() => {
-                            setAgentSuccessMessage(null);
-                            setSelectedToolNames((prev) =>
-                              prev.includes(toolName)
-                                ? prev.filter((name) => name !== toolName)
-                                : [...prev, toolName].sort()
-                            );
-                          }}
-                        />
-                        <span>{toolName}</span>
-                      </label>
-                    ))}
-                    {toolNames.length === 0 && !isToolsLoading && (
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Select tools</p>
+                    {isToolsLoading && (
                       <p className="text-xs text-muted-foreground">
-                        No tools registered yet. Add tools from the Tools tab.
+                        Loading tools…
                       </p>
                     )}
+                    {isLoadingMcpConnectors && (
+                      <p className="text-xs text-muted-foreground">
+                        Loading MCP connector details…
+                      </p>
+                    )}
+                    {toolsError && (
+                      <p className="text-xs text-destructive">{toolsError}</p>
+                    )}
                   </div>
+
+                  {toolGroups.map((group) => (
+                    <div key={group.key} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          {group.label}
+                        </p>
+                        <span className="text-xs text-muted-foreground">
+                          {group.tools.length} tool
+                          {group.tools.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {group.tools.map((tool) => (
+                          <label
+                            key={tool.name}
+                            className="flex gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedToolNames.includes(tool.name)}
+                              onChange={() => {
+                                setAgentSuccessMessage(null);
+                                setSelectedToolNames((prev) =>
+                                  prev.includes(tool.name)
+                                    ? prev.filter((name) => name !== tool.name)
+                                    : [...prev, tool.name].sort()
+                                );
+                              }}
+                            />
+                            <div className="flex flex-col gap-1">
+                              <span className="text-sm font-semibold">
+                                {tool.name}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {tool.description}
+                              </span>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+
+                  {allToolNames.length === 0 && !isToolsLoading && (
+                    <p className="text-xs text-muted-foreground">
+                      No tools registered yet. Add tools from the Tools tab or
+                      create an MCP connector.
+                    </p>
+                  )}
                 </div>
               )}
 

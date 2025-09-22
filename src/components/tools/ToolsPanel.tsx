@@ -317,6 +317,25 @@ export function ToolsPanel({
                 : updatedAtDate.toLocaleString();
             const deleteState = deleteStates[tool.name] ?? "idle";
             const isDeleting = deleteState === "deleting";
+            const origin = tool.origin;
+            const isOpenApiOrigin = origin?.type === "openapi";
+            const openApiSpecName =
+              isOpenApiOrigin && typeof origin.specName === "string"
+                ? origin.specName
+                : null;
+            const openApiOperationId =
+              isOpenApiOrigin && typeof origin.operationId === "string"
+                ? origin.operationId
+                : null;
+            const isMcpOrigin = origin?.type === "mcp";
+            const mcpServerId =
+              isMcpOrigin && typeof origin.serverId === "string"
+                ? origin.serverId
+                : null;
+            const mcpToolName =
+              isMcpOrigin && typeof origin.toolName === "string"
+                ? origin.toolName
+                : null;
 
             return (
               <Card key={`${tool.source}-${tool.name}`} className="p-3">
@@ -335,12 +354,18 @@ export function ToolsPanel({
                           Confirmation:{" "}
                           {tool.requiresConfirmation ? "Required" : "Automatic"}
                         </span>
-                        {tool.origin?.specName && (
-                          <span>Spec: {tool.origin.specName}</span>
-                        )}
-                        {tool.origin?.operationId && (
-                          <span>Operation: {tool.origin.operationId}</span>
-                        )}
+                        {openApiSpecName ? (
+                          <span>Spec: {openApiSpecName}</span>
+                        ) : null}
+                        {openApiOperationId ? (
+                          <span>Operation: {openApiOperationId}</span>
+                        ) : null}
+                        {isMcpOrigin && mcpServerId ? (
+                          <span>
+                            MCP tool: {mcpServerId}
+                            {mcpToolName ? `/${mcpToolName}` : ""}
+                          </span>
+                        ) : null}
                         <span>Updated: {updatedLabel}</span>
                       </div>
                     </div>

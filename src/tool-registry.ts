@@ -11,17 +11,27 @@ import { buildToolsFromOpenApi, OpenApiToolError } from "./lib/openapi-tools";
 
 export type RegisteredToolSource = "builtin" | "dynamic";
 
+interface McpToolOrigin {
+  type: "mcp";
+  serverId: string;
+  toolName: string;
+}
+
+type ToolOrigin =
+  | {
+      type: "openapi" | "manual";
+      specName?: string;
+      operationId?: string;
+    }
+  | McpToolOrigin;
+
 export interface ToolListItem {
   name: string;
   description: string;
   requiresConfirmation: boolean;
   schema?: Record<string, unknown> | null;
   source: RegisteredToolSource;
-  origin?: {
-    type: "openapi" | "manual";
-    specName?: string;
-    operationId?: string;
-  } | null;
+  origin?: ToolOrigin | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -44,6 +54,18 @@ export interface RegisterOpenApiSpecResult {
 
 interface RegisterOptions {
   timestamp?: string;
+}
+
+export interface RegisterMcpToolDefinition {
+  name: string;
+  description: string;
+  requiresConfirmation: boolean;
+  schema?: Record<string, unknown> | null;
+  tool: ToolSet[string];
+  execution?: ExecutionHandler | null;
+  originalName: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 function normaliseTimestamp(input?: string, fallback?: () => Date): string {
@@ -216,6 +238,104 @@ export class ToolRegistry {
       tools: registeredTools,
       prompt: this.getToolPrompt()
     };
+  }
+
+  registerMcpTools(
+    serverId: string,
+    definitions: RegisterMcpToolDefinition[],
+    options: RegisterOptions = {}
+  ): ToolListItem[] {
+    const timestamp = normaliseTimestamp(options.timestamp, this.now);
+    const registered: ToolListItem[] = [];
+
+    for (
+      let index = this.dynamicToolMetadata.length - 1;
+      index >= 0;
+      index -= 1
+    ) {
+      const metadata = this.dynamicToolMetadata[index];
+      if (
+        metadata.origin?.type === "mcp" &&
+        metadata.origin.serverId === serverId
+      ) {
+        delete this.dynamicTools[metadata.name];
+        delete this.dynamicExecutions[metadata.name];
+        this.dynamicToolMetadata.splice(index, 1);
+        delete this.guidanceOverrides[metadata.name];
+        delete this.guidanceUpdatedAt[metadata.name];
+        this.deletedTools[metadata.name] = timestamp;
+      }
+    }
+
+    for (const definition of definitions) {
+      const name = definition.name;
+      const description =
+        this.guidanceOverrides[name] ?? definition.description;
+      const createdAt = definition.createdAt ?? timestamp;
+      const updatedAt = this.guidanceOverrides[name]
+        ? (this.guidanceUpdatedAt[name] ?? timestamp)
+        : (definition.updatedAt ?? timestamp);
+
+      const metadata: ToolListItem = {
+        name,
+        description,
+        requiresConfirmation: definition.requiresConfirmation,
+        schema: definition.schema ?? null,
+        source: "dynamic",
+        origin: {
+          type: "mcp",
+          serverId,
+          toolName: definition.originalName
+        },
+        createdAt,
+        updatedAt
+      } satisfies ToolListItem;
+
+      const toolWithDescription = cloneWithDescription(
+        definition.tool,
+        description
+      );
+      this.dynamicTools[name] = toolWithDescription;
+      if (definition.execution) {
+        this.dynamicExecutions[name] = definition.execution;
+      } else {
+        delete this.dynamicExecutions[name];
+      }
+      this.dynamicToolMetadata.push(metadata);
+      delete this.deletedTools[name];
+      delete this.guidanceOverrides[name];
+      delete this.guidanceUpdatedAt[name];
+      registered.push(metadata);
+    }
+
+    return registered;
+  }
+
+  removeMcpServer(serverId: string, removedAt?: string): string[] {
+    const timestamp = normaliseTimestamp(removedAt, this.now);
+    const removedNames: string[] = [];
+
+    for (
+      let index = this.dynamicToolMetadata.length - 1;
+      index >= 0;
+      index -= 1
+    ) {
+      const metadata = this.dynamicToolMetadata[index];
+      if (
+        metadata.origin?.type === "mcp" &&
+        metadata.origin.serverId === serverId
+      ) {
+        removedNames.push(metadata.name);
+        this.dynamicToolMetadata.splice(index, 1);
+        delete this.dynamicTools[metadata.name];
+        delete this.dynamicExecutions[metadata.name];
+        delete this.guidanceOverrides[metadata.name];
+        delete this.guidanceUpdatedAt[metadata.name];
+        this.deletedTools[metadata.name] = timestamp;
+      }
+    }
+
+    return removedNames;
   }
 
   clearDynamicTools() {

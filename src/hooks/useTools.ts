@@ -1,16 +1,31 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+export type ToolOrigin =
+  | {
+      type: "manual";
+    }
+  | {
+      type: "openapi";
+      specName?: string;
+      operationId?: string;
+    }
+  | {
+      type: "mcp";
+      serverId: string;
+      toolName: string;
+    }
+  | {
+      type: Exclude<string, "manual" | "openapi" | "mcp">;
+      [key: string]: unknown;
+    };
+
 export interface ToolListItem {
   name: string;
   description: string;
   requiresConfirmation: boolean;
   schema?: Record<string, unknown> | null;
   source: "builtin" | "dynamic";
-  origin?: {
-    type: "openapi" | "manual" | string;
-    specName?: string;
-    operationId?: string;
-  } | null;
+  origin?: ToolOrigin | null;
   createdAt: string;
   updatedAt: string;
 }

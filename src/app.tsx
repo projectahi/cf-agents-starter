@@ -12,8 +12,10 @@ import { AgentSelector } from "@/components/agent-chat/AgentSelector";
 import { Toggle } from "@/components/toggle/Toggle";
 import { ToolsPanel } from "@/components/tools/ToolsPanel";
 import { AgentConfigPanel } from "@/components/agent-config/AgentConfigPanel";
+import { McpConnectorsPanel } from "@/components/mcp/McpConnectorsPanel";
 import { useAgentConfig } from "@/hooks/useAgentConfig";
 import { useTools } from "@/hooks/useTools";
+import { useMcpConnectors } from "@/hooks/useMcpConnectors";
 import { cn } from "@/lib/utils";
 import type { ChatMessageMetadata } from "@/shared";
 
@@ -25,7 +27,8 @@ import {
   Sun,
   Trash,
   Wrench,
-  Gear
+  Gear,
+  PlugsConnected
 } from "@phosphor-icons/react";
 
 export default function Chat() {
@@ -36,9 +39,9 @@ export default function Chat() {
   });
   const [showDebug, setShowDebug] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"chat" | "tools" | "config">(
-    "chat"
-  );
+  const [activeTab, setActiveTab] = useState<
+    "chat" | "tools" | "mcp" | "config"
+  >("chat");
   const {
     tools: toolMetadata,
     isLoading: isLoadingTools,
@@ -61,7 +64,19 @@ export default function Chat() {
     agentActionError
   } = useAgentConfig();
 
+  const {
+    connectors: mcpConnectors,
+    isLoading: isLoadingMcpConnectors,
+    error: mcpConnectorsError,
+    refresh: refreshMcpConnectors,
+    createConnector,
+    updateConnector,
+    refreshConnector,
+    deleteConnector
+  } = useMcpConnectors();
+
   const isToolsView = activeTab === "tools";
+  const isMcpView = activeTab === "mcp";
   const isConfigView = activeTab === "config";
 
   useEffect(() => {
@@ -146,12 +161,14 @@ export default function Chat() {
 
   const headerTitle = isToolsView
     ? "Tool Manager"
-    : isConfigView
-      ? "Agent Configuration"
-      : "AI Chat Agent";
+    : isMcpView
+      ? "MCP Connectors"
+      : isConfigView
+        ? "Agent Configuration"
+        : "AI Chat Agent";
 
   const contentContainerClass =
-    isToolsView || isConfigView
+    isToolsView || isConfigView || isMcpView
       ? "flex-1 overflow-y-auto p-4"
       : "flex-1 overflow-hidden";
 
@@ -215,6 +232,17 @@ export default function Chat() {
           >
             <Wrench size={18} />
             Tools
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("mcp");
+              setIsSidebarOpen(false);
+            }}
+            className={navButtonClass(activeTab === "mcp")}
+          >
+            <PlugsConnected size={18} />
+            MCP Connectors
           </button>
           <button
             type="button"
@@ -332,8 +360,22 @@ export default function Chat() {
               onUpdateGuidance={updateToolGuidance}
               onDeleteTool={deleteTool}
             />
+          ) : isMcpView ? (
+            <McpConnectorsPanel
+              connectors={mcpConnectors}
+              isLoading={isLoadingMcpConnectors}
+              error={mcpConnectorsError}
+              onRefresh={refreshMcpConnectors}
+              onCreate={createConnector}
+              onUpdate={updateConnector}
+              onDelete={deleteConnector}
+              onResync={refreshConnector}
+            />
           ) : isConfigView ? (
-            <AgentConfigPanel />
+            <AgentConfigPanel
+              mcpConnectors={mcpConnectors}
+              isLoadingMcpConnectors={isLoadingMcpConnectors}
+            />
           ) : (
             <AgentChatWindow
               messages={agentMessages}
