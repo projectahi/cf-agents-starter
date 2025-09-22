@@ -6,4 +6,9 @@ declare namespace Cloudflare {
 		AI: Ai;
 	}
 }
-interface Env extends Cloudflare.Env {}
+interface Env extends Cloudflare.Env {
+	OPENAI_API_KEY?: string;
+	GATEWAY_BASE_URL?: string;
+	AI_GATEWAY_BASE_URL?: string;
+	CF_AI_GATEWAY_BASE_URL?: string;
+}

@@ -482,7 +482,12 @@ function HasOpenAIKey() {
                   <code className="bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded text-red-600 dark:text-red-400 font-mono text-sm">
                     OPENAI_API_KEY
                   </code>
-                  . <br />
+                  . Optionally set a{" "}
+                  <code className="bg-red-100 dark:bg-red-900/30 px-1.5 py-0.5 rounded text-red-600 dark:text-red-400 font-mono text-sm">
+                    GATEWAY_BASE_URL
+                  </code>{" "}
+                  secret to route calls through Cloudflare AI Gateway.
+                  <br />
                   You can also use a different model provider by following these{" "}
                   <a
                     href="https://github.com/cloudflare/agents-starter?tab=readme-ov-file#use-a-different-ai-model-provider"

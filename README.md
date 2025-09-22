@@ -41,7 +41,11 @@ Create a `.dev.vars` file:
 
 ```env
 OPENAI_API_KEY=your_openai_api_key
+GATEWAY_BASE_URL=https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_name>/openai
 ```
+
+> **Tip:** `GATEWAY_BASE_URL` is optional locally, but set it in all environments to route
+> traffic through Cloudflare AI Gateway while continuing to use your OpenAI API key.
 
 4. Run locally:
 

@@ -1,4 +1,4 @@
-import { routeAgentRequest, type Schedule } from "agents";
+import { routeAgentRequest, type Schedule, type AgentContext } from "agents";
 
 import { getSchedulePrompt } from "agents/schedule";
 
@@ -18,7 +18,7 @@ import {
   jsonSchema
 } from "ai";
 import type { UIMessage } from "@ai-sdk/react";
-import { openai } from "@ai-sdk/openai";
+import { createOpenAI } from "@ai-sdk/openai";
 import { processToolCalls, cleanupMessages } from "./utils";
 import { ZodError } from "zod";
 import { z } from "zod/v3";
@@ -106,12 +106,6 @@ async function forwardToAgentDurableObject(
   return response ?? new Response("Not found", { status: 404 });
 }
 
-// Cloudflare AI Gateway
-// const openai = createOpenAI({
-//   apiKey: env.OPENAI_API_KEY,
-//   baseURL: env.GATEWAY_BASE_URL,
-// });
-
 /**
  * Chat Agent implementation that handles real-time AI chat interactions
  */
@@ -164,13 +158,52 @@ type StoredMcpServer = {
   updatedAt: string;
 };
 
+function resolveOpenAIApiKey(env: Env | undefined) {
+  return env?.OPENAI_API_KEY ?? process.env.OPENAI_API_KEY;
+}
+
+function resolveGatewayBaseUrl(env: Env | undefined) {
+  return (
+    env?.CF_AI_GATEWAY_BASE_URL ??
+    env?.AI_GATEWAY_BASE_URL ??
+    env?.GATEWAY_BASE_URL ??
+    process.env.CF_AI_GATEWAY_BASE_URL ??
+    process.env.AI_GATEWAY_BASE_URL ??
+    process.env.GATEWAY_BASE_URL ??
+    undefined
+  );
+}
+
 export class Chat extends AIChatAgent<Env> {
+  private readonly openai: ReturnType<typeof createOpenAI>;
   private agentRegistryInitialized = false;
   private toolRegistry = createToolRegistry(() => new Date());
   private toolRegistryInitialized = false;
   private pendingRespondingAgent: RespondingAgentMetadata | null = null;
   private mcpServers = new Map<string, StoredMcpServer>();
   private mcpConnectionPromises = new Map<string, Promise<void>>();
+
+  constructor(ctx: AgentContext, env: Env) {
+    super(ctx, env);
+    this.openai = this.createOpenAIClient(env);
+  }
+
+  private createOpenAIClient(env: Env) {
+    const apiKey = resolveOpenAIApiKey(env);
+    const baseURL = resolveGatewayBaseUrl(env);
+
+    const config: Parameters<typeof createOpenAI>[0] = {};
+
+    if (apiKey) {
+      config.apiKey = apiKey;
+    }
+
+    if (baseURL) {
+      config.baseURL = baseURL.replace(/\/$/, "");
+    }
+
+    return createOpenAI(config);
+  }
 
   private ensureAgentRegistry() {
     if (this.agentRegistryInitialized) {
@@ -1436,7 +1469,7 @@ Specialist agents:\n${roster}`;
 
     try {
       const { text } = await generateText({
-        model: openai(activeProfile.config.modelId),
+        model: this.openai(activeProfile.config.modelId),
         system: systemPrompt,
         messages: convertToModelMessages(messages),
         temperature: Math.min(
@@ -2391,7 +2424,7 @@ ${scheduleInstruction}${selectionNote}${identityInstruction}${toolsSection}`;
             : undefined
         );
 
-        const model = openai(targetProfile.config.modelId);
+        const model = this.openai(targetProfile.config.modelId);
 
         const result = streamText({
           system: systemPrompt,
@@ -2514,7 +2547,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/check-open-ai-key") {
-      const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
+      const hasOpenAIKey = !!resolveOpenAIApiKey(env);
       return Response.json({
         success: hasOpenAIKey
       });
@@ -2547,7 +2580,7 @@ export default {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!resolveOpenAIApiKey(env)) {
       console.error(
         "OPENAI_API_KEY is not set, don't forget to set it locally in .dev.vars, and use `wrangler secret bulk .dev.vars` to upload it to production"
       );
