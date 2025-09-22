@@ -95,18 +95,18 @@ function AgentChatPreview({
       <p>Save the agent first to start testing in chat.</p>
     </div>
   ) : (
-    <div className="rounded-md border border-dashed border-border/70 bg-background p-4 text-sm text-muted-foreground">
+    <div className="rounded-lg border border-dashed border-border/50 bg-background/50 p-6 text-sm text-muted-foreground">
       Start a conversation to see how this agent behaves with the current
       configuration.
     </div>
   );
 
   return (
-    <Card className="flex h-full flex-col overflow-hidden border border-border/80">
-      <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
+    <div className="flex h-full flex-col bg-background">
+      <div className="flex items-center justify-between border-b border-border/30 px-6 py-4">
         <div>
-          <h3 className="text-sm font-semibold">Test this agent</h3>
-          <p className="text-xs text-muted-foreground">
+          <h3 className="text-base font-semibold">Test this agent</h3>
+          <p className="text-sm text-muted-foreground">
             Chat in real time to validate prompts, tools, and behaviors.
           </p>
         </div>
@@ -137,11 +137,11 @@ function AgentChatPreview({
         placeholder="Send a test message"
         disabledPlaceholder="Create this agent to start chatting"
         className="flex h-full flex-col"
-        messagesContainerClassName="bg-background/60 px-4 py-4 space-y-4"
-        composerClassName="border-t border-border/70 bg-background px-4 py-3"
+        messagesContainerClassName="bg-background px-6 py-4 space-y-4"
+        composerClassName="border-t border-border/30 bg-background px-6 py-4"
         showAvatars={false}
       />
-    </Card>
+    </div>
   );
 }
 
@@ -709,48 +709,55 @@ export function AgentConfigPanel({
     : "Never";
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={handleBackToList}>
-          <ArrowLeft size={16} />
-          Back to agents
-        </Button>
-        <div>
-          <h2 className="text-lg font-semibold">
-            {isDraftNew
-              ? "Create agent"
-              : (activeEditingAgent?.name ?? "Agent editor")}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Configure settings on the left and test live responses on the right.
-          </p>
+    <div className="flex h-full flex-col">
+      {/* Header */}
+      <div className="flex-shrink-0 border-b border-border/50 px-6 py-4">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={handleBackToList}>
+            <ArrowLeft size={16} />
+            Back to agents
+          </Button>
+          <div>
+            <h2 className="text-lg font-semibold">
+              {isDraftNew
+                ? "Create agent"
+                : (activeEditingAgent?.name ?? "Agent editor")}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Configure settings on the left and test live responses on the right.
+            </p>
+          </div>
         </div>
+
+        {(agentActionError || agentSuccessMessage) && (
+          <div className="mt-4 space-y-2">
+            {agentActionError && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {agentActionError}
+              </div>
+            )}
+            {agentSuccessMessage && !agentActionError && (
+              <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">
+                {agentSuccessMessage}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {(agentActionError || agentSuccessMessage) && (
-        <div className="space-y-2">
-          {agentActionError && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-              {agentActionError}
-            </div>
-          )}
-          {agentSuccessMessage && !agentActionError && (
-            <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-600 dark:text-emerald-400">
-              {agentSuccessMessage}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.6fr)_minmax(0,0.4fr)]">
-        <div className="flex flex-col gap-4">
-          <Card className="space-y-4 border border-border/80 p-4">
-            <div className="space-y-1">
-              <h3 className="text-sm font-semibold">Agent profile</h3>
-              <p className="text-xs text-muted-foreground">
-                Update the name, summary, and tool access for this agent.
-              </p>
-            </div>
+      {/* Main Content Area */}
+      <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">
+        {/* Left Configuration Panel */}
+        <div className="basis-full lg:basis-3/5 overflow-y-auto min-h-0 border-r-0 lg:border-r border-border/50">
+          <div className="space-y-6 px-6 py-6">
+            {/* Agent Profile Section */}
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <h3 className="text-base font-semibold">Agent profile</h3>
+                <p className="text-sm text-muted-foreground">
+                  Update the name, summary, and tool access for this agent.
+                </p>
+              </div>
 
             <form
               onSubmit={
@@ -1023,28 +1030,29 @@ export function AgentConfigPanel({
                   </div>
                 </div>
               )}
-            </form>
-          </Card>
-
-          <Card className="space-y-4 border border-border/80 p-4">
-            <div className="space-y-1">
-              <h3 className="text-sm font-semibold">Model & prompt</h3>
-              <p className="text-xs text-muted-foreground">
-                Fine-tune the base model and guardrails for this agent.
-              </p>
+              </form>
             </div>
 
-            {saveError && (
-              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                {saveError}
+            {/* Model & Prompt Section */}
+            <div className="space-y-4 border-t border-border/50 pt-6">
+              <div className="space-y-1">
+                <h3 className="text-base font-semibold">Model & prompt</h3>
+                <p className="text-sm text-muted-foreground">
+                  Fine-tune the base model and guardrails for this agent.
+                </p>
               </div>
-            )}
 
-            {configSuccessMessage && !saveError && (
-              <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 text-sm text-emerald-600 dark:text-emerald-400">
-                {configSuccessMessage}
-              </div>
-            )}
+              {saveError && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {saveError}
+                </div>
+              )}
+
+              {configSuccessMessage && !saveError && (
+                <div className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">
+                  {configSuccessMessage}
+                </div>
+              )}
 
             <div className="space-y-4">
               <div className="space-y-2">
@@ -1154,37 +1162,41 @@ export function AgentConfigPanel({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs text-muted-foreground">
-                Last saved: {configLastSaved}
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={handleResetConfig}
-                  disabled={isBusy}
-                >
-                  Reset to defaults
-                </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  disabled={disableConfigSubmit}
-                  onClick={handleSaveConfig}
-                >
-                  {isBusy ? "Saving..." : "Save changes"}
-                </Button>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground">
+                  Last saved: {configLastSaved}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={handleResetConfig}
+                    disabled={isBusy}
+                  >
+                    Reset to defaults
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={disableConfigSubmit}
+                    onClick={handleSaveConfig}
+                  >
+                    {isBusy ? "Saving..." : "Save changes"}
+                  </Button>
+                </div>
               </div>
             </div>
-          </Card>
+          </div>
         </div>
 
-        <AgentChatPreview
-          agentKey={isDraftNew ? null : editingAgentId}
-          confirmationToolNames={confirmationToolNames}
-          disabled={isDraftNew}
-        />
+        {/* Right Chat Panel */}
+        <div className="basis-full lg:basis-2/5 min-h-0 flex flex-col">
+          <AgentChatPreview
+            agentKey={isDraftNew ? null : editingAgentId}
+            confirmationToolNames={confirmationToolNames}
+            disabled={isDraftNew}
+          />
+        </div>
       </div>
     </div>
   );
