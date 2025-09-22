@@ -426,7 +426,7 @@ export class Chat extends AIChatAgent<Env> {
 
     const aiTool = {
       description,
-      parameters: jsonSchema(schemaForRegistration),
+      inputSchema: jsonSchema(schemaForRegistration),
       execute: executor
     } as unknown as ToolSet[string];
 
